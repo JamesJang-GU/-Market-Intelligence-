@@ -1,4 +1,4 @@
-name: Alphaliner Weekly Update v2
+name: Alphaliner Weekly Update v3
 
 on:
   workflow_dispatch:
