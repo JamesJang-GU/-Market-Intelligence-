@@ -224,7 +224,7 @@ def get_previous_snapshot_id(current_snapshot_id):
         return None
     conn = get_db_conn()
     cur = conn.cursor()
-    # snapshot_detail에 상세 데이터가 실제로 존재하는 정상 스냅샷만 이전 스냅샷으로 인정
+    # 최소 50개 이상의 선사 세부 데이터가 존재하는 정상 이전 스냅샷만 필터링
     cur.execute('''
         SELECT m.snapshot_id 
         FROM snapshot_master m
@@ -232,7 +232,7 @@ def get_previous_snapshot_id(current_snapshot_id):
           AND m.total_teu IS NOT NULL 
           AND m.total_teu != '' 
           AND m.total_teu != 'None'
-          AND EXISTS (SELECT 1 FROM snapshot_detail d WHERE d.snapshot_id = m.snapshot_id)
+          AND (SELECT COUNT(*) FROM snapshot_detail d WHERE d.snapshot_id = m.snapshot_id) >= 50
         ORDER BY m.captured_at DESC, m.snapshot_id DESC 
         LIMIT 1
     ''', (meta['captured_at'],))
@@ -268,7 +268,7 @@ def get_snapshot_id_by_mode(current_snapshot_id, compare_mode='previous', custom
     current_meta = get_snapshot_meta(current_snapshot_id)
     current_captured = current_meta['captured_at'] if current_meta else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    valid_condition = "AND total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None' AND EXISTS (SELECT 1 FROM snapshot_detail d WHERE d.snapshot_id = snapshot_master.snapshot_id)"
+    valid_condition = "AND total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None' AND (SELECT COUNT(*) FROM snapshot_detail d WHERE d.snapshot_id = snapshot_master.snapshot_id) >= 50"
     
     if compare_mode == '1m':
         target = (datetime.datetime.strptime(current_captured, '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
