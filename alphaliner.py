@@ -49,17 +49,31 @@ def fetch_bundle(force=True):
 
 if __name__ == "__main__":
 
+    print("=" * 60)
     print("ALPHALINER WEEKLY UPDATE")
+    print("=" * 60)
 
-    payload = fetch_bundle(True)
+    bundle = fetch_bundle(force=True)
 
     print(
-        "Rows collected:",
-        len(payload.get("rows", []))
+        f"Rows collected : {len(bundle['df'])}"
     )
 
-    print("Summary")
-    print(payload.get("summary"))
+    snapshot_id = save_snapshot(bundle)
 
-    print("Regional")
-    print(payload.get("regional"))
+    print(
+        f"Snapshot Saved : {snapshot_id}"
+    )
+
+    meta = get_snapshot_meta(snapshot_id)
+
+    if meta:
+        print(
+            f"Total TEU : {meta['total_teu']}"
+        )
+
+        print(
+            f"Active Ships : {meta['active_ships']}"
+        )
+
+    print("Update Completed")
