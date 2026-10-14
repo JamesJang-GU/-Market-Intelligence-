@@ -51,3 +51,7 @@ if __name__=='__main__':
     print('ALPHALINER WEEKLY UPDATE')
     payload=fetch_bundle(True)
     print('Rows collected:', len(payload.get('rows',[])))
+
+print(bundle["df"].head())
+
+print(f"Rows collected : {len(bundle['df'])}")
