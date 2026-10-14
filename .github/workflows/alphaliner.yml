@@ -44,3 +44,6 @@ jobs:
             git commit -m "Auto update DB"
             git push
           )
+      - name: Echo Test
+        run: |
+          echo "HELLO GITHUB ACTIONS"
