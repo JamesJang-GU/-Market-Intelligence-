@@ -2,8 +2,12 @@ name: Alphaliner Weekly Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # 매주 월요일 실행
+    - cron: '0 0 * * 1'
   workflow_dispatch:
+
+# 봇 권한 부여 (추가된 부분)
+permissions:
+  contents: write
 
 jobs:
   update:
@@ -17,7 +21,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 1. GitHub Runner에 Google Chrome 설치 (필수)
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
 
@@ -26,12 +29,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 2. --cron 옵션을 반드시 붙여서 실행 (웹서버 무한대기 방지)
       - name: Run Crawler
         run: |
           python alphaliner.py --cron
 
-      # 3. 변경된 DB 파일 Git Commit & Push
       - name: Commit and Push DB
         run: |
           git config --global user.name "github-actions[bot]"
