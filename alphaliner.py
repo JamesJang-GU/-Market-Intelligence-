@@ -113,27 +113,37 @@ def make_snapshot_hash(bundle):
 def save_snapshot(bundle):
     try:
         conn = get_db_conn()
+        summary = bundle.get('summary', {})
+        regional = bundle.get('regional', {})
+        df = bundle['df'].copy()
+
+        # 데이터가 비어있거나 summary가 None이면 저장 스킵
+        if df.empty or not summary.get('totalTEU') or summary.get('totalTEU') == 'None':
+            print("[Warning] Parsed data is incomplete. Skipping DB save.")
+            conn.close()
+            return None
+
         snapshot_hash = make_snapshot_hash(bundle)
         cur = conn.cursor()
-        cur.execute('SELECT snapshot_id FROM snapshot_master WHERE snapshot_hash = ?', (snapshot_hash,))
+        
+        # None 수치가 포함된 이전 해시는 중복 검사 대상에서 제외
+        cur.execute('SELECT snapshot_id FROM snapshot_master WHERE snapshot_hash = ? AND total_teu IS NOT NULL AND total_teu != "None"', (snapshot_hash,))
         row = cur.fetchone()
         if row:
             conn.close()
             return row[0]
-        summary = bundle.get('summary', {})
-        regional = bundle.get('regional', {})
-        df = bundle['df'].copy()
+
         captured_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cur.execute(
             'INSERT INTO snapshot_master (captured_at, snapshot_hash, active_ships, total_teu, trans_atlantic, trans_pacific, feast_europe, row_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 captured_at,
                 snapshot_hash,
-                summary.get('totalActiveShips', ''),
-                summary.get('totalTEU', ''),
-                regional.get('transAtlantic', ''),
-                regional.get('transPacific', ''),
-                regional.get('feastEurope', ''),
+                str(summary.get('totalActiveShips', '')),
+                str(summary.get('totalTEU', '')),
+                str(regional.get('transAtlantic', '')),
+                str(regional.get('transPacific', '')),
+                str(regional.get('feastEurope', '')),
                 len(df)
             )
         )
@@ -286,28 +296,35 @@ def fetch_bundle(force=False):
     driver = webdriver.Chrome(options=chrome_options)
     try:
         driver.get(ALPHALINER_URL)
-        time.sleep(8)
+        time.sleep(10)
         
         payload = driver.execute_script(r"""
             var out = {summary:{}, regional:{}, rows:[]};
             try {
                 var txt = document.body.innerText || '';
-                var active = txt.match(/([0-9,]+)\s*active ships/i);
-                if (!active) active = txt.match(/active ships\s*:?\s*([0-9,]+)/i);
-                out.summary.totalActiveShips = active ? active[1] : null;
+                
+                var activeMatch = txt.match(/([0-9,]+)\s+active\s+ships/i);
+                if (activeMatch) {
+                    out.summary.totalActiveShips = activeMatch[1];
+                }
 
-                var totalTeu = txt.match(/([0-9,]+)\s*TEU/i);
-                out.summary.totalTEU = totalTeu ? totalTeu[1] : null;
+                var teuMatch = txt.match(/([0-9,]+)\s+TEU/i);
+                if (teuMatch) {
+                    out.summary.totalTEU = teuMatch[1];
+                }
 
-                var matches = [...txt.matchAll(/([0-9,]+)\s*TEU/gi)].map(function(m){ return m[1]; });
-                if (matches.length >= 4) {
-                    out.regional.transAtlantic = matches[1];
-                    out.regional.transPacific = matches[2];
-                    out.regional.feastEurope = matches[3];
-                } else if (matches.length >= 3) {
-                    out.regional.transAtlantic = matches[0];
-                    out.regional.transPacific = matches[1];
-                    out.regional.feastEurope = matches[2];
+                var regBlock = txt.match(/Trans-Atlantic[\s\S]*?Trans-Pacific[\s\S]*?Feast-Europe[\s\S]*?([0-9,]+)\s*TEU[\s\S]*?([0-9,]+)\s*TEU[\s\S]*?([0-9,]+)\s*TEU/i);
+                if (regBlock) {
+                    out.regional.transAtlantic = regBlock[1];
+                    out.regional.transPacific = regBlock[2];
+                    out.regional.feastEurope = regBlock[3];
+                } else {
+                    var matches = [...txt.matchAll(/([0-9,]+)\s*TEU/gi)].map(function(m){ return m[1]; });
+                    if (matches.length >= 4) {
+                        out.regional.transAtlantic = matches[1];
+                        out.regional.transPacific = matches[2];
+                        out.regional.feastEurope = matches[3];
+                    }
                 }
             } catch(e) {}
 
@@ -343,15 +360,16 @@ def fetch_bundle(force=False):
     }).sort_values('Rank').reset_index(drop=True)
 
     summary_data = payload.get('summary', {})
-    if not summary_data.get('totalTEU') and not df.empty and 'Total_TEU' in df.columns:
-        calculated_teu = pd.to_numeric(df['Total_TEU'], errors='coerce').sum()
-        if calculated_teu > 0:
-            summary_data['totalTEU'] = f"{int(calculated_teu):,}"
 
-    if not summary_data.get('totalActiveShips') and not df.empty and 'Total_Ships' in df.columns:
-        calculated_ships = pd.to_numeric(df['Total_Ships'], errors='coerce').sum()
-        if calculated_ships > 0:
-            summary_data['totalActiveShips'] = f"{int(calculated_ships):,}"
+    if (not summary_data.get('totalTEU') or summary_data.get('totalTEU') == 'None') and not df.empty:
+        calc_teu = pd.to_numeric(df['Total_TEU'], errors='coerce').sum()
+        if calc_teu > 0:
+            summary_data['totalTEU'] = f"{int(calc_teu):,}"
+
+    if (not summary_data.get('totalActiveShips') or summary_data.get('totalActiveShips') == 'None') and not df.empty:
+        calc_ships = pd.to_numeric(df['Total_Ships'], errors='coerce').sum()
+        if calc_ships > 0:
+            summary_data['totalActiveShips'] = f"{int(calc_ships):,}"
 
     bundle = {
         'df': df,
@@ -779,7 +797,6 @@ def run_crawler_only():
     else:
         print("[System] Snapshot already exists or failed to save.")
 
-    # GitHub Pages 호스팅용 index.html 파일 자동 생성
     print("[System] Generating static index.html for GitHub Pages...")
     with app.test_request_context('/'):
         html_content = index()
