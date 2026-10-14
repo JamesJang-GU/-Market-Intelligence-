@@ -1,0 +1,1343 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alphaliner Top 100 Carriers</title>
+<style>
+:root {
+  --bg: #f0f3f7;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --border: #e2e8f0;
+  --text: #2c3e50;
+  --muted: #7f8c8d;
+  --primary: #3498db;
+  --success: #27ae60;
+  --shadow: 0 2px 12px rgba(0,0,0,0.06);
+  --radius: 12px;
+}
+* { box-sizing: border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1380px; margin: 24px auto; padding: 20px; background: var(--bg); color: var(--text); line-height: 1.45; }
+.header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid var(--primary); padding-bottom:16px; margin-bottom:20px; gap:12px; flex-wrap:wrap; }
+h1 { margin:0; color:var(--text); font-size:28px; }
+.meta { color: var(--muted); font-size: 12px; margin-bottom: 20px; line-height: 1.7; }
+.meta strong { color: #34495e; }
+.card { background:var(--surface); padding:18px; border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:20px; }
+.card:last-of-type { margin-bottom: 16px; }
+.section-label, .panel-title { margin:0 0 12px 0; font-weight:700; color:#34495e; }
+.section-label { font-size:14px; }
+.panel-title { font-size:20px; line-height:1.25; }
+.metrics-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:14px; }
+.insight-card { background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:16px; }
+.insight-label { font-size:12px; font-weight:700; letter-spacing:.4px; color:#64748b; text-transform:uppercase; margin-bottom:8px; }
+.insight-value { font-size:28px; font-weight:700; color:#0f172a; margin-bottom:6px; }
+.insight-desc { font-size:13px; color:#475569; line-height:1.45; }
+.chart-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+.chart-toolbar + .table-wrap, .chart-toolbar + .detail-wrap { margin-top: 8px; }
+.toolbar-title { font-size:14px; font-weight:700; color:#34495e; }
+.toolbar-subtitle { font-size:12px; color:var(--muted); margin-top:4px; }
+.download-group { display:flex; gap:8px; flex-wrap:wrap; }
+.download-btn { padding:8px 14px; min-height:36px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--primary); background:white; color:var(--primary); border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; text-decoration:none; }
+.download-btn:hover { background:var(--primary); color:white; }
+.download-btn.xlsx { border-color:var(--success); color:var(--success); }
+.download-btn.xlsx:hover { background:var(--success); color:white; }
+.quick-facts { background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:16px; margin-top:18px; font-size:13px; color:#475569; line-height:1.7; }
+.quick-facts b { color:#0f172a; }
+.delta-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:14px; }
+.delta-card { background:#fbfdff; border:1px solid var(--border); border-radius:10px; padding:16px; }
+.delta-main { font-size:22px; font-weight:700; margin-top:4px; }
+.delta-pos { color:#dc2626; font-weight:700; }
+.delta-neg { color:#2563eb; font-weight:700; }
+.delta-zero { color:#64748b; font-weight:600; }
+.table-wrap, .detail-wrap { width:100%; overflow-x:visible; margin-top: 2px; }
+table { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+th, td { border:1px solid #e5e7eb; padding:6px 8px; text-align:right; vertical-align:middle; white-space:normal; word-break:break-word; overflow-wrap:anywhere; }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
+.table-wrap th, .detail-wrap th { vertical-align: middle; }
+th { background:#f8fafc; color:#334155; font-weight:700; }
+.detail-wrap table, .table-wrap table { min-width:100%; width:100%; }
+.detail-wrap th, .detail-wrap td, .table-wrap th, .table-wrap td { font-size:10px; line-height:1.15; padding:4px 5px; }
+.detail-wrap th:first-child, .detail-wrap td:first-child { width:4.5%; }
+.detail-wrap th:nth-child(2), .detail-wrap td:nth-child(2) { width:12%; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
+.detail-wrap th:nth-child(n+3), .detail-wrap td:nth-child(n+3) { width:7.6%; white-space:nowrap; word-break:normal; overflow-wrap:normal; }
+.detail-super th { background:#eaf2fb; color:#12355b; font-weight:800; text-align:center; }
+.detail-sub th { background:#f8fafc; color:#334155; font-weight:700; text-align:center; white-space:nowrap; }
+.footer { color:var(--muted); font-size:12px; text-align:center; margin-top:12px; padding-bottom: 4px; }
+@media (max-width: 768px) { body { margin:0; padding:16px; } h1 { font-size:24px; } .card { padding:16px; } }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Alphaliner Top 100 Carriers Dashboard</h1>
+    </div>
+  </div>
+
+  <div class="meta">
+    <strong>Source:</strong> Alphaliner Public Top 100 &nbsp;|&nbsp;
+    <strong>Fetched at:</strong> 2026-10-14 08:12:55
+    
+    &nbsp;|&nbsp; <strong>Compared with previous snapshot:</strong> 2026-10-14 07:42:25
+    
+  </div>
+
+  <div class="card">
+    <div class="chart-toolbar">
+      <div>
+        <div class="toolbar-title">Comparison Basis</div>
+        <div class="toolbar-subtitle">Choose how the current snapshot should be compared with historical data</div>
+      </div>
+      <form method="get" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <select name="compare_mode" style="padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; min-height:36px;">
+          <option value="previous" selected>Previous snapshot</option>
+          <option value="1m" >1 month ago</option>
+          <option value="3m" >3 months ago</option>
+          <option value="custom" >Custom date</option>
+        </select>
+        <input type="date" name="custom_date" value="" style="padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; min-height:36px;">
+        <button type="submit" class="download-btn">Apply</button>
+      </form>
+    </div>
+  <div class="insight-desc">Current comparison basis: <b>Previous snapshot</b></div>
+  </div>
+
+  <div class="card">
+    <label class="section-label">Current Snapshot Highlights</label>
+    <div class="metrics-grid">
+      <div class="insight-card"><div class="insight-label">Active Ships</div><div class="insight-value">7,662</div><div class="insight-desc">Number of active ships in the currently fetched public snapshot.</div></div>
+      <div class="insight-card"><div class="insight-label">Total TEU</div><div class="insight-value">34,876,450</div><div class="insight-desc">Aggregate fleet capacity shown by the source snapshot.</div></div>
+      <div class="insight-card"><div class="insight-label">Trans-Atlantic</div><div class="insight-value">34,467,833</div><div class="insight-desc">Weekly regional capacity shown in the public source.</div></div>
+      <div class="insight-card"><div class="insight-label">Trans-Pacific</div><div class="insight-value">155,430</div><div class="insight-desc">Weekly regional capacity shown in the public source.</div></div>
+      <div class="insight-card"><div class="insight-label">FEast-Europe</div><div class="insight-value">617,462</div><div class="insight-desc">Weekly regional capacity shown in the public source.</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="panel-title">Snapshot Change Summary</h2>
+    
+    <div class="delta-grid">
+      <div class="delta-card"><div class="insight-label">Total TEU Change</div><div class="delta-main delta-zero">0</div><div class="insight-desc">Current total fleet capacity vs previous snapshot.</div></div>
+      <div class="delta-card"><div class="insight-label">Active Ships Change</div><div class="delta-main delta-zero">0</div><div class="insight-desc">Active vessel count vs previous snapshot.</div></div>
+      <div class="delta-card"><div class="insight-label">Biggest TEU Increase</div><div class="delta-main delta-pos">Mediterranean Shg Co</div><div class="insight-desc"><span class="delta-zero">0</span></div></div>
+      <div class="delta-card"><div class="insight-label">Biggest TEU Decrease</div><div class="delta-main delta-neg">Mediterranean Shg Co</div><div class="insight-desc"><span class="delta-zero">0</span></div></div>
+    </div>
+    
+  </div>
+
+  <div class="card">
+    <div class="chart-toolbar">
+      <div>
+        <div class="toolbar-title">Top 10 carriers by total capacity</div>
+        <div class="toolbar-subtitle">Publicly available Alphaliner Top 100 snapshot</div>
+      </div>
+    </div>
+    <div style="height:520px; width:100%;">                        <script>window.PlotlyConfig = {MathJaxConfig: 'local'};</script>
+        <script charset="utf-8" src="https://cdn.plot.ly/plotly-4.1.1.min.js" integrity="sha256-O24V1F27f8pb0glCkelh3cVHLNiHAJ5gCaVtq2aNch8=" crossorigin="anonymous"></script>                <div id="85713074-5300-4aaa-8455-2dda1c741836" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("85713074-5300-4aaa-8455-2dda1c741836")) {                    Plotly.newPlot(                        "85713074-5300-4aaa-8455-2dda1c741836",                        [{"cliponaxis":false,"marker":{"color":"#1d4ed8"},"name":"Total TEU","text":["7.5M","4.7M","4.5M","3.7M","2.4M","2.2M","2.0M","1.0M","0.8M","0.7M"],"textfont":{"size":11},"textposition":"outside","x":["Mediterranean Shg Co","Maersk","CMA CGM Group","COSCO Group","Hapag-Lloyd","ONE (Ocean Network Express)","Evergreen Line","HMM Co Ltd","Yang Ming Marine Transport Corp.","Zim"],"y":{"dtype":"i4","bdata":"FrxxABQlSAAgOkQAZ8o3AIvGJADSbiEAgyMfAGzIDwDQxAsAaI0KAA=="},"type":"bar"}],                        {"template":{"data":{"barpolar":[{"marker":{"line":{"color":"white","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"white","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"#C8D4E3","linecolor":"#C8D4E3","minorgridcolor":"#C8D4E3","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"#C8D4E3","linecolor":"#C8D4E3","minorgridcolor":"#C8D4E3","startlinecolor":"#2a3f5f"},"type":"carpet"}],"choropleth":[{"colorbar":{"outlinewidth":0,"ticks":""},"type":"choropleth"}],"contourcarpet":[{"colorbar":{"outlinewidth":0,"ticks":""},"type":"contourcarpet"}],"contour":[{"colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"type":"contour"}],"heatmap":[{"colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"type":"heatmap"}],"histogram2dcontour":[{"colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"type":"histogram2dcontour"}],"histogram2d":[{"colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"type":"histogram2d"}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"mesh3d":[{"colorbar":{"outlinewidth":0,"ticks":""},"type":"mesh3d"}],"parcoords":[{"line":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"parcoords"}],"pie":[{"automargin":true,"type":"pie"}],"scatter3d":[{"line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scatter3d"}],"scattercarpet":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scattercarpet"}],"scattergeo":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scattergeo"}],"scattergl":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scattergl"}],"scattermap":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scattermap"}],"scatterpolargl":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scatterpolargl"}],"scatterpolar":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scatterpolar"}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"scatterternary":[{"marker":{"colorbar":{"outlinewidth":0,"ticks":""}},"type":"scatterternary"}],"surface":[{"colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"type":"surface"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}]},"layout":{"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"autotypenumbers":"strict","coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]],"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]},"colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"geo":{"bgcolor":"white","lakecolor":"white","landcolor":"white","showlakes":true,"showland":true,"subunitcolor":"#C8D4E3"},"hoverlabel":{"align":"left"},"hovermode":"closest","paper_bgcolor":"white","plot_bgcolor":"white","polar":{"angularaxis":{"gridcolor":"#EBF0F8","linecolor":"#EBF0F8","ticks":""},"bgcolor":"white","radialaxis":{"gridcolor":"#EBF0F8","linecolor":"#EBF0F8","ticks":""}},"scene":{"xaxis":{"backgroundcolor":"white","gridcolor":"#DFE8F3","gridwidth":2,"linecolor":"#EBF0F8","showbackground":true,"ticks":"","zerolinecolor":"#EBF0F8"},"yaxis":{"backgroundcolor":"white","gridcolor":"#DFE8F3","gridwidth":2,"linecolor":"#EBF0F8","showbackground":true,"ticks":"","zerolinecolor":"#EBF0F8"},"zaxis":{"backgroundcolor":"white","gridcolor":"#DFE8F3","gridwidth":2,"linecolor":"#EBF0F8","showbackground":true,"ticks":"","zerolinecolor":"#EBF0F8"}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"ternary":{"aaxis":{"gridcolor":"#DFE8F3","linecolor":"#A2B1C6","ticks":""},"baxis":{"gridcolor":"#DFE8F3","linecolor":"#A2B1C6","ticks":""},"bgcolor":"white","caxis":{"gridcolor":"#DFE8F3","linecolor":"#A2B1C6","ticks":""}},"title":{"x":0.05},"xaxis":{"automargin":true,"gridcolor":"#EBF0F8","linecolor":"#EBF0F8","ticks":"","title":{"standoff":15},"zerolinecolor":"#EBF0F8","zerolinewidth":2},"yaxis":{"automargin":true,"gridcolor":"#EBF0F8","linecolor":"#EBF0F8","ticks":"","title":{"standoff":15},"zerolinecolor":"#EBF0F8","zerolinewidth":2}}},"margin":{"l":20,"r":20,"t":30,"b":60},"xaxis":{"categoryorder":"array","categoryarray":["Mediterranean Shg Co","Maersk","CMA CGM Group","COSCO Group","Hapag-Lloyd","ONE (Ocean Network Express)","Evergreen Line","HMM Co Ltd","Yang Ming Marine Transport Corp.","Zim"],"tickangle":-30},"hoverlabel":{"namelength":-1},"height":520,"yaxis":{"title":{"text":"Total TEU"}},"showlegend":false},                        {"responsive": true}                    )                };            </script>        </div>
+    <div class="quick-facts">
+      Top 3 share: <b>48.1%</b>
+      &nbsp;|&nbsp;
+      Top 5 share: <b>65.7%</b><br>
+      Operators to reach 50% cumulative share: <b>4</b>
+      &nbsp;/&nbsp; <b>58.7%</b><br>
+      Operators inside the 50% cumulative threshold: Mediterranean Shg Co, Maersk, CMA CGM Group, COSCO Group
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="panel-title">Summary Table</h2>
+    <div class="table-wrap"><div><table class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Rank</th>
+      <th>Operator</th>
+      <th>Market_Share</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Mediterranean Shg Co</td>
+      <td>21.5%</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Maersk</td>
+      <td>13.7%</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>CMA CGM Group</td>
+      <td>12.9%</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>COSCO Group</td>
+      <td>10.6%</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Hapag-Lloyd</td>
+      <td>7.0%</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>ONE (Ocean Network Express)</td>
+      <td>6.3%</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Evergreen Line</td>
+      <td>5.9%</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>HMM Co Ltd</td>
+      <td>3.0%</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Yang Ming Marine Transport Corp.</td>
+      <td>2.2%</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Zim</td>
+      <td>2.0%</td>
+    </tr>
+  </tbody>
+</table></div></div>
+  </div>
+
+  <div class="card">
+    <h2 class="panel-title">Detailed Fleet Structure</h2>
+    <div class="detail-wrap"><div><table border="0"><thead><tr class="detail-super"><th rowspan="2">Rank</th><th rowspan="2">Operator</th><th colspan="2">Total</th><th colspan="2">Owned</th><th colspan="3">Chartered</th><th colspan="3">Orderbook</th></tr><tr class="detail-sub"><th>TEU</th><th>Ships</th><th>TEU</th><th>Ships</th><th>TEU</th><th>Ships</th><th>%</th><th>TEU</th><th>Ships</th><th>%</th></tr></thead><tbody><tr><td>1</td><td title="Mediterranean Shg Co">Mediterranean Shg Co</td><td>7,453,718</td><td>1,017</td><td>4,784,229</td><td>766</td><td>2,669,489</td><td>251</td><td>35.8%</td><td>2,909,318</td><td>164</td><td>39.0%</td></tr><tr><td>2</td><td title="Maersk">Maersk</td><td>4,728,084</td><td>750</td><td>2,943,996</td><td>359</td><td>1,784,088</td><td>391</td><td>37.7%</td><td>1,764,122</td><td>131</td><td>37.3%</td></tr><tr><td>3</td><td title="CMA CGM Group">CMA CGM Group</td><td>4,471,328</td><td>729</td><td>2,982,687</td><td>385</td><td>1,488,641</td><td>344</td><td>33.3%</td><td>1,669,991</td><td>158</td><td>37.3%</td></tr><tr><td>4</td><td title="COSCO Group">COSCO Group</td><td>3,656,295</td><td>565</td><td>2,202,330</td><td>210</td><td>1,453,965</td><td>355</td><td>39.8%</td><td>1,908,966</td><td>156</td><td>52.2%</td></tr><tr><td>5</td><td title="Hapag-Lloyd">Hapag-Lloyd</td><td>2,410,123</td><td>289</td><td>1,455,918</td><td>134</td><td>954,205</td><td>155</td><td>39.6%</td><td>489,224</td><td>62</td><td>20.3%</td></tr><tr><td>6</td><td title="ONE (Ocean Network Express)">ONE (Ocean Network Express)</td><td>2,191,058</td><td>271</td><td>1,051,480</td><td>112</td><td>1,139,578</td><td>159</td><td>52.0%</td><td>570,336</td><td>46</td><td>26.0%</td></tr><tr><td>7</td><td title="Evergreen Line">Evergreen Line</td><td>2,040,707</td><td>243</td><td>1,496,083</td><td>170</td><td>544,624</td><td>73</td><td>26.7%</td><td>851,904</td><td>75</td><td>41.7%</td></tr><tr><td>8</td><td title="HMM Co Ltd">HMM Co Ltd</td><td>1,034,348</td><td>97</td><td>847,404</td><td>72</td><td>186,944</td><td>25</td><td>18.1%</td><td>220,642</td><td>36</td><td>21.3%</td></tr><tr><td>9</td><td title="Yang Ming Marine Transport Corp.">Yang Ming Marine Transport Corp.</td><td>771,280</td><td>99</td><td>397,896</td><td>64</td><td>373,384</td><td>35</td><td>48.4%</td><td>256,660</td><td>20</td><td>33.3%</td></tr><tr><td>10</td><td title="Zim">Zim</td><td>691,560</td><td>113</td><td>92,934</td><td>15</td><td>598,626</td><td>98</td><td>86.6%</td><td>222,236</td><td>27</td><td>32.1%</td></tr><tr><td>11</td><td title="Wan Hai Lines">Wan Hai Lines</td><td>633,064</td><td>125</td><td>633,064</td><td>125</td><td>0</td><td>0</td><td>0.0%</td><td>495,800</td><td>48</td><td>78.3%</td></tr><tr><td>12</td><td title="PIL (Pacific Int. Line)">PIL (Pacific Int. Line)</td><td>472,200</td><td>102</td><td>346,748</td><td>84</td><td>125,452</td><td>18</td><td>26.6%</td><td>305,798</td><td>29</td><td>64.8%</td></tr><tr><td>13</td><td title="SITC">SITC</td><td>187,297</td><td>121</td><td>163,687</td><td>99</td><td>23,610</td><td>22</td><td>12.6%</td><td>66,232</td><td>37</td><td>35.4%</td></tr><tr><td>14</td><td title="X-Press Feeders Group">X-Press Feeders Group</td><td>186,316</td><td>102</td><td>116,716</td><td>57</td><td>69,600</td><td>45</td><td>37.4%</td><td>83,200</td><td>18</td><td>44.7%</td></tr><tr><td>15</td><td title="KMTC">KMTC</td><td>163,876</td><td>66</td><td>94,721</td><td>30</td><td>69,155</td><td>36</td><td>42.2%</td><td>73,356</td><td>11</td><td>44.8%</td></tr><tr><td>16</td><td title="Global Feeder Shipping LLC">Global Feeder Shipping LLC</td><td>148,611</td><td>58</td><td>59,977</td><td>25</td><td>88,634</td><td>33</td><td>59.6%</td><td>11,152</td><td>3</td><td>7.5%</td></tr><tr><td>17</td><td title="DP World">DP World</td><td>146,613</td><td>84</td><td>31,341</td><td>10</td><td>115,272</td><td>74</td><td>78.6%</td><td>84,841</td><td>17</td><td>57.9%</td></tr><tr><td>18</td><td title="IRISL Group">IRISL Group</td><td>140,184</td><td>27</td><td>140,184</td><td>27</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>19</td><td title="Sinokor Merchant Marine">Sinokor Merchant Marine</td><td>132,526</td><td>69</td><td>130,741</td><td>68</td><td>1,785</td><td>1</td><td>1.3%</td><td>52,000</td><td>4</td><td>39.2%</td></tr><tr><td>20</td><td title="TS Lines">TS Lines</td><td>125,784</td><td>45</td><td>106,059</td><td>38</td><td>19,725</td><td>7</td><td>15.7%</td><td>69,432</td><td>15</td><td>55.2%</td></tr><tr><td>21</td><td title="Emirates Shipping Line">Emirates Shipping Line</td><td>114,852</td><td>25</td><td>0</td><td>0</td><td>114,852</td><td>25</td><td>100.0%</td><td>42,510</td><td>3</td><td>37.0%</td></tr><tr><td>22</td><td title="China United Lines (CULines)">China United Lines (CULines)</td><td>109,433</td><td>47</td><td>18,120</td><td>10</td><td>91,313</td><td>37</td><td>83.4%</td><td>91,693</td><td>18</td><td>83.8%</td></tr><tr><td>23</td><td title="RCL (Regional Container L.)">RCL (Regional Container L.)</td><td>95,921</td><td>33</td><td>85,299</td><td>27</td><td>10,622</td><td>6</td><td>11.1%</td><td>153,354</td><td>31</td><td>159.9%</td></tr><tr><td>24</td><td title="Ningbo Ocean Shg Co">Ningbo Ocean Shg Co</td><td>87,650</td><td>87</td><td>61,418</td><td>49</td><td>26,232</td><td>38</td><td>29.9%</td><td>60,400</td><td>20</td><td>68.9%</td></tr><tr><td>25</td><td title="Interasia Lines">Interasia Lines</td><td>85,077</td><td>28</td><td>64,553</td><td>22</td><td>20,524</td><td>6</td><td>24.1%</td><td>65,070</td><td>13</td><td>76.5%</td></tr><tr><td>26</td><td title="Tangshan Port Hede Shipping">Tangshan Port Hede Shipping</td><td>76,020</td><td>52</td><td>1,874</td><td>3</td><td>74,146</td><td>49</td><td>97.5%</td><td>2,693</td><td>1</td><td>3.5%</td></tr><tr><td>27</td><td title="Grimaldi (Napoli)">Grimaldi (Napoli)</td><td>75,158</td><td>48</td><td>75,158</td><td>48</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>28</td><td title="Antong Holdings (QASC)">Antong Holdings (QASC)</td><td>72,564</td><td>71</td><td>53,994</td><td>37</td><td>18,570</td><td>34</td><td>25.6%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>29</td><td title="Sinolines">Sinolines</td><td>68,743</td><td>42</td><td>30,566</td><td>19</td><td>38,177</td><td>23</td><td>55.5%</td><td>53,075</td><td>13</td><td>77.2%</td></tr><tr><td>30</td><td title="Matson">Matson</td><td>68,420</td><td>28</td><td>40,355</td><td>19</td><td>28,065</td><td>9</td><td>41.0%</td><td>10,860</td><td>3</td><td>15.9%</td></tr><tr><td>31</td><td title="Shanghai Jin Jiang Shipping">Shanghai Jin Jiang Shipping</td><td>67,125</td><td>56</td><td>32,449</td><td>27</td><td>34,676</td><td>29</td><td>51.7%</td><td>27,200</td><td>16</td><td>40.5%</td></tr><tr><td>32</td><td title="SM Line Corp.">SM Line Corp.</td><td>66,801</td><td>15</td><td>64,188</td><td>13</td><td>2,613</td><td>2</td><td>3.9%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>33</td><td title="Swire Shipping">Swire Shipping</td><td>59,502</td><td>30</td><td>47,917</td><td>23</td><td>11,585</td><td>7</td><td>19.5%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>34</td><td title="Zhonggu Logistics Corp.">Zhonggu Logistics Corp.</td><td>55,725</td><td>60</td><td>19,957</td><td>12</td><td>35,768</td><td>48</td><td>64.2%</td><td>67,800</td><td>18</td><td>121.7%</td></tr><tr><td>35</td><td title="FESCO">FESCO</td><td>54,568</td><td>38</td><td>36,292</td><td>23</td><td>18,276</td><td>15</td><td>33.5%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>36</td><td title="Arkas Line / EMES">Arkas Line / EMES</td><td>52,632</td><td>32</td><td>50,524</td><td>30</td><td>2,108</td><td>2</td><td>4.0%</td><td>44,892</td><td>12</td><td>85.3%</td></tr><tr><td>37</td><td title="Seaboard Marine">Seaboard Marine</td><td>48,848</td><td>25</td><td>34,347</td><td>14</td><td>14,501</td><td>11</td><td>29.7%</td><td>3,666</td><td>1</td><td>7.5%</td></tr><tr><td>38</td><td title="Samudera">Samudera</td><td>44,850</td><td>32</td><td>13,175</td><td>14</td><td>31,675</td><td>18</td><td>70.6%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>39</td><td title="Akkon Lines">Akkon Lines</td><td>44,793</td><td>32</td><td>1,776</td><td>2</td><td>43,017</td><td>30</td><td>96.0%</td><td>3,630</td><td>1</td><td>8.1%</td></tr><tr><td>40</td><td title="Meratus">Meratus</td><td>44,038</td><td>66</td><td>44,038</td><td>66</td><td>0</td><td>0</td><td>0.0%</td><td>6,146</td><td>9</td><td>14.0%</td></tr><tr><td>41</td><td title="Tailwind Shipping Lines">Tailwind Shipping Lines</td><td>43,406</td><td>12</td><td>6,330</td><td>2</td><td>37,076</td><td>10</td><td>85.4%</td><td>42,000</td><td>5</td><td>96.8%</td></tr><tr><td>42</td><td title="Namsung Shipping">Namsung Shipping</td><td>39,768</td><td>30</td><td>37,339</td><td>27</td><td>2,429</td><td>3</td><td>6.1%</td><td>15,940</td><td>5</td><td>40.1%</td></tr><tr><td>43</td><td title="Tanto Intim Line">Tanto Intim Line</td><td>38,554</td><td>57</td><td>38,554</td><td>57</td><td>0</td><td>0</td><td>0.0%</td><td>1,854</td><td>2</td><td>4.8%</td></tr><tr><td>44</td><td title="Shandong Marine Corporation">Shandong Marine Corporation</td><td>31,246</td><td>45</td><td>11,598</td><td>17</td><td>19,648</td><td>28</td><td>62.9%</td><td>6,320</td><td>4</td><td>20.2%</td></tr><tr><td>45</td><td title="Salam Pacific Indonesia Lines">Salam Pacific Indonesia Lines</td><td>31,010</td><td>44</td><td>31,010</td><td>44</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>46</td><td title="Great White Fleet">Great White Fleet</td><td>29,973</td><td>14</td><td>17,481</td><td>7</td><td>12,492</td><td>7</td><td>41.7%</td><td>15,500</td><td>5</td><td>51.7%</td></tr><tr><td>47</td><td title="Linea Messina">Linea Messina</td><td>27,682</td><td>12</td><td>22,358</td><td>5</td><td>5,324</td><td>7</td><td>19.2%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>48</td><td title="Sea Legend Shipping">Sea Legend Shipping</td><td>21,556</td><td>9</td><td>4,890</td><td>1</td><td>16,666</td><td>8</td><td>77.3%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>49</td><td title="Dole Ocean Liner">Dole Ocean Liner</td><td>21,150</td><td>16</td><td>20,610</td><td>14</td><td>540</td><td>2</td><td>2.6%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>50</td><td title="Chun Kyung (CK Line)">Chun Kyung (CK Line)</td><td>20,211</td><td>18</td><td>13,236</td><td>9</td><td>6,975</td><td>9</td><td>34.5%</td><td>15,012</td><td>4</td><td>74.3%</td></tr><tr><td>51</td><td title="Hainan Yangpu Newnew Shipping">Hainan Yangpu Newnew Shipping</td><td>19,470</td><td>7</td><td>18,250</td><td>6</td><td>1,220</td><td>1</td><td>6.3%</td><td>9,620</td><td>2</td><td>49.4%</td></tr><tr><td>52</td><td title="Crowley Liner Services">Crowley Liner Services</td><td>19,142</td><td>16</td><td>11,094</td><td>9</td><td>8,048</td><td>7</td><td>42.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>53</td><td title="Kawa Shipping">Kawa Shipping</td><td>18,644</td><td>10</td><td>0</td><td>0</td><td>18,644</td><td>10</td><td>100.0%</td><td>24,206</td><td>5</td><td>129.8%</td></tr><tr><td>54</td><td title="Asean Seas Line">Asean Seas Line</td><td>18,508</td><td>14</td><td>1,781</td><td>1</td><td>16,727</td><td>13</td><td>90.4%</td><td>10,600</td><td>2</td><td>57.3%</td></tr><tr><td>55</td><td title="Tropical Shg / TOTE Maritime">Tropical Shg / TOTE Maritime</td><td>18,203</td><td>24</td><td>16,535</td><td>21</td><td>1,668</td><td>3</td><td>9.2%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>56</td><td title="Shipping Corp. of India">Shipping Corp. of India</td><td>17,834</td><td>3</td><td>8,800</td><td>2</td><td>9,034</td><td>1</td><td>50.7%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>57</td><td title="Temas Line">Temas Line</td><td>17,743</td><td>35</td><td>17,743</td><td>35</td><td>0</td><td>0</td><td>0.0%</td><td>3,430</td><td>7</td><td>19.3%</td></tr><tr><td>58</td><td title="Bengal Tiger Line">Bengal Tiger Line</td><td>17,635</td><td>10</td><td>0</td><td>0</td><td>17,635</td><td>10</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>59</td><td title="Taicang Container Lines">Taicang Container Lines</td><td>17,202</td><td>14</td><td>4,369</td><td>4</td><td>12,833</td><td>10</td><td>74.6%</td><td>12,024</td><td>4</td><td>69.9%</td></tr><tr><td>60</td><td title="MTT Shipping">MTT Shipping</td><td>15,917</td><td>17</td><td>13,493</td><td>15</td><td>2,424</td><td>2</td><td>15.2%</td><td>12,332</td><td>6</td><td>77.5%</td></tr><tr><td>61</td><td title="Transworld Group Singapore">Transworld Group Singapore</td><td>14,922</td><td>12</td><td>14,922</td><td>12</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>62</td><td title="Boluda Lines">Boluda Lines</td><td>14,629</td><td>18</td><td>9,326</td><td>12</td><td>5,303</td><td>6</td><td>36.2%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>63</td><td title="Cool Carriers">Cool Carriers</td><td>14,217</td><td>40</td><td>4,022</td><td>13</td><td>10,195</td><td>27</td><td>71.7%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>64</td><td title="Turkon Line">Turkon Line</td><td>13,857</td><td>6</td><td>11,512</td><td>5</td><td>2,345</td><td>1</td><td>16.9%</td><td>4,000</td><td>1</td><td>28.9%</td></tr><tr><td>65</td><td title="Eimskip">Eimskip</td><td>13,069</td><td>15</td><td>5,174</td><td>7</td><td>7,895</td><td>8</td><td>60.4%</td><td>4,560</td><td>2</td><td>34.9%</td></tr><tr><td>66</td><td title="Pasha Hawaii Transport Lines">Pasha Hawaii Transport Lines</td><td>12,903</td><td>6</td><td>12,903</td><td>6</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>67</td><td title="Independent Container Line">Independent Container Line</td><td>12,398</td><td>4</td><td>6,182</td><td>2</td><td>6,216</td><td>2</td><td>50.1%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>68</td><td title="Caribbean Feeder Services">Caribbean Feeder Services</td><td>12,090</td><td>10</td><td>0</td><td>0</td><td>12,090</td><td>10</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>69</td><td title="Peel Ports (BG Freight)">Peel Ports (BG Freight)</td><td>12,061</td><td>12</td><td>0</td><td>0</td><td>12,061</td><td>12</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>70</td><td title="HR Lines">HR Lines</td><td>11,932</td><td>8</td><td>11,932</td><td>8</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>71</td><td title="Pan Ocean (Container)">Pan Ocean (Container)</td><td>11,399</td><td>10</td><td>9,186</td><td>7</td><td>2,213</td><td>3</td><td>19.4%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>72</td><td title="MODUL">MODUL</td><td>11,191</td><td>4</td><td>0</td><td>0</td><td>11,191</td><td>4</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>73</td><td title="Hai An Transport">Hai An Transport</td><td>11,057</td><td>8</td><td>11,057</td><td>8</td><td>0</td><td>0</td><td>0.0%</td><td>46,484</td><td>10</td><td>420.4%</td></tr><tr><td>74</td><td title="Qatar Navigation (Milaha)">Qatar Navigation (Milaha)</td><td>10,939</td><td>7</td><td>8,615</td><td>5</td><td>2,324</td><td>2</td><td>21.2%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>75</td><td title="King Ocean">King Ocean</td><td>10,853</td><td>15</td><td>0</td><td>0</td><td>10,853</td><td>15</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>76</td><td title="Greta Shipping">Greta Shipping</td><td>10,516</td><td>6</td><td>1,118</td><td>1</td><td>9,398</td><td>5</td><td>89.4%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>77</td><td title="Philippine Span Asia Carrier Corp.">Philippine Span Asia Carrier Corp.</td><td>10,143</td><td>17</td><td>8,926</td><td>15</td><td>1,217</td><td>2</td><td>12.0%</td><td>400</td><td>1</td><td>3.9%</td></tr><tr><td>78</td><td title="Neptune Pacific Direct Line">Neptune Pacific Direct Line</td><td>9,783</td><td>9</td><td>9,783</td><td>9</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>79</td><td title="Imoto Lines">Imoto Lines</td><td>9,295</td><td>31</td><td>7,423</td><td>24</td><td>1,872</td><td>7</td><td>20.1%</td><td>1,141</td><td>3</td><td>12.3%</td></tr><tr><td>80</td><td title="Pan Continental Shg">Pan Continental Shg</td><td>9,288</td><td>8</td><td>8,660</td><td>7</td><td>628</td><td>1</td><td>6.8%</td><td>2,200</td><td>2</td><td>23.7%</td></tr><tr><td>81</td><td title="Borchard Lines">Borchard Lines</td><td>9,284</td><td>10</td><td>0</td><td>0</td><td>9,284</td><td>10</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>82</td><td title="Dalian Trawind Marine Co">Dalian Trawind Marine Co</td><td>9,272</td><td>2</td><td>9,272</td><td>2</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>83</td><td title="Dalian Jifa Bohai Rim Container L.">Dalian Jifa Bohai Rim Container L.</td><td>9,082</td><td>13</td><td>3,140</td><td>4</td><td>5,942</td><td>9</td><td>65.4%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>84</td><td title="Sea Express Shipping Lines">Sea Express Shipping Lines</td><td>8,865</td><td>6</td><td>1,550</td><td>1</td><td>7,315</td><td>5</td><td>82.5%</td><td>8,763</td><td>4</td><td>98.8%</td></tr><tr><td>85</td><td title="Vistar Shipping LLC">Vistar Shipping LLC</td><td>8,611</td><td>5</td><td>8,611</td><td>5</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>86</td><td title="Q Express Line Sdn Bhd">Q Express Line Sdn Bhd</td><td>8,458</td><td>2</td><td>0</td><td>0</td><td>8,458</td><td>2</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>87</td><td title="GS Lines">GS Lines</td><td>8,154</td><td>9</td><td>6,718</td><td>7</td><td>1,436</td><td>2</td><td>17.6%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>88</td><td title="Transit LLC">Transit LLC</td><td>8,092</td><td>7</td><td>6,582</td><td>6</td><td>1,510</td><td>1</td><td>18.7%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>89</td><td title="Irish Continental Group">Irish Continental Group</td><td>8,041</td><td>9</td><td>4,699</td><td>5</td><td>3,342</td><td>4</td><td>41.6%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>90</td><td title="EAS Datong">EAS Datong</td><td>8,017</td><td>6</td><td>7,415</td><td>5</td><td>602</td><td>1</td><td>7.5%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>91</td><td title="Oceanic Cargo Lines">Oceanic Cargo Lines</td><td>7,970</td><td>17</td><td>7,970</td><td>17</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>92</td><td title="OVP Shipping">OVP Shipping</td><td>7,774</td><td>6</td><td>0</td><td>0</td><td>7,774</td><td>6</td><td>100.0%</td><td>8,792</td><td>2</td><td>113.1%</td></tr><tr><td>93</td><td title="Safetrans Shipping">Safetrans Shipping</td><td>7,772</td><td>3</td><td>0</td><td>0</td><td>7,772</td><td>3</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>94</td><td title="Harbour-Link Group Bhd">Harbour-Link Group Bhd</td><td>7,687</td><td>10</td><td>7,687</td><td>10</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>95</td><td title="Del Monte Fresh Produce Co">Del Monte Fresh Produce Co</td><td>7,656</td><td>6</td><td>7,656</td><td>6</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>96</td><td title="Panda Express Line">Panda Express Line</td><td>7,628</td><td>5</td><td>0</td><td>0</td><td>7,628</td><td>5</td><td>100.0%</td><td>1,510</td><td>1</td><td>19.8%</td></tr><tr><td>97</td><td title="Kambara Kisen">Kambara Kisen</td><td>7,566</td><td>7</td><td>7,566</td><td>7</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>98</td><td title="Tarros">Tarros</td><td>7,323</td><td>5</td><td>0</td><td>0</td><td>7,323</td><td>5</td><td>100.0%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>99</td><td title="Folk Maritime">Folk Maritime</td><td>7,184</td><td>5</td><td>6,449</td><td>4</td><td>735</td><td>1</td><td>10.2%</td><td>0</td><td>0</td><td>0.0%</td></tr><tr><td>100</td><td title="Sea Lead Shipping">Sea Lead Shipping</td><td>7,157</td><td>3</td><td>7,157</td><td>3</td><td>0</td><td>0</td><td>0.0%</td><td>0</td><td>0</td><td>0.0%</td></tr></tbody></table></div></div>
+  </div>
+
+  <div class="card">
+    <h2 class="panel-title">Current vs Previous Snapshot Delta</h2>
+    
+    <div class="table-wrap"><div><table class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Rank</th>
+      <th>Operator</th>
+      <th>Current TEU</th>
+      <th>Previous TEU</th>
+      <th>Δ TEU</th>
+      <th>Current Share</th>
+      <th>Previous Share</th>
+      <th>Δ Share</th>
+      <th>Rank Move</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Mediterranean Shg Co</td>
+      <td>7,453,718</td>
+      <td>7,453,718</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>21.5%</td>
+      <td>21.5%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Maersk</td>
+      <td>4,728,084</td>
+      <td>4,728,084</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>13.7%</td>
+      <td>13.7%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>CMA CGM Group</td>
+      <td>4,471,328</td>
+      <td>4,471,328</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>12.9%</td>
+      <td>12.9%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>COSCO Group</td>
+      <td>3,656,295</td>
+      <td>3,656,295</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>10.6%</td>
+      <td>10.6%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Hapag-Lloyd</td>
+      <td>2,410,123</td>
+      <td>2,410,123</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>7.0%</td>
+      <td>7.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>ONE (Ocean Network Express)</td>
+      <td>2,191,058</td>
+      <td>2,191,058</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>6.3%</td>
+      <td>6.3%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Evergreen Line</td>
+      <td>2,040,707</td>
+      <td>2,040,707</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>5.9%</td>
+      <td>5.9%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>HMM Co Ltd</td>
+      <td>1,034,348</td>
+      <td>1,034,348</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>3.0%</td>
+      <td>3.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Yang Ming Marine Transport Corp.</td>
+      <td>771,280</td>
+      <td>771,280</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>2.2%</td>
+      <td>2.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Zim</td>
+      <td>691,560</td>
+      <td>691,560</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>2.0%</td>
+      <td>2.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td>Wan Hai Lines</td>
+      <td>633,064</td>
+      <td>633,064</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>1.8%</td>
+      <td>1.8%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td>PIL (Pacific Int. Line)</td>
+      <td>472,200</td>
+      <td>472,200</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>1.4%</td>
+      <td>1.4%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td>SITC</td>
+      <td>187,297</td>
+      <td>187,297</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.5%</td>
+      <td>0.5%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td>X-Press Feeders Group</td>
+      <td>186,316</td>
+      <td>186,316</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.5%</td>
+      <td>0.5%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>15</td>
+      <td>KMTC</td>
+      <td>163,876</td>
+      <td>163,876</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.5%</td>
+      <td>0.5%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>16</td>
+      <td>Global Feeder Shipping LLC</td>
+      <td>148,611</td>
+      <td>148,611</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.4%</td>
+      <td>0.4%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>17</td>
+      <td>DP World</td>
+      <td>146,613</td>
+      <td>146,613</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.4%</td>
+      <td>0.4%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>18</td>
+      <td>IRISL Group</td>
+      <td>140,184</td>
+      <td>140,184</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.4%</td>
+      <td>0.4%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>19</td>
+      <td>Sinokor Merchant Marine</td>
+      <td>132,526</td>
+      <td>132,526</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.4%</td>
+      <td>0.4%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>20</td>
+      <td>TS Lines</td>
+      <td>125,784</td>
+      <td>125,784</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.4%</td>
+      <td>0.4%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>21</td>
+      <td>Emirates Shipping Line</td>
+      <td>114,852</td>
+      <td>114,852</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.3%</td>
+      <td>0.3%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>22</td>
+      <td>China United Lines (CULines)</td>
+      <td>109,433</td>
+      <td>109,433</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.3%</td>
+      <td>0.3%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>23</td>
+      <td>RCL (Regional Container L.)</td>
+      <td>95,921</td>
+      <td>95,921</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.3%</td>
+      <td>0.3%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>24</td>
+      <td>Ningbo Ocean Shg Co</td>
+      <td>87,650</td>
+      <td>87,650</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.3%</td>
+      <td>0.3%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>25</td>
+      <td>Interasia Lines</td>
+      <td>85,077</td>
+      <td>85,077</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>26</td>
+      <td>Tangshan Port Hede Shipping</td>
+      <td>76,020</td>
+      <td>76,020</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>27</td>
+      <td>Grimaldi (Napoli)</td>
+      <td>75,158</td>
+      <td>75,158</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>28</td>
+      <td>Antong Holdings (QASC)</td>
+      <td>72,564</td>
+      <td>72,564</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>29</td>
+      <td>Sinolines</td>
+      <td>68,743</td>
+      <td>68,743</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>30</td>
+      <td>Matson</td>
+      <td>68,420</td>
+      <td>68,420</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>31</td>
+      <td>Shanghai Jin Jiang Shipping</td>
+      <td>67,125</td>
+      <td>67,125</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>32</td>
+      <td>SM Line Corp.</td>
+      <td>66,801</td>
+      <td>66,801</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>33</td>
+      <td>Swire Shipping</td>
+      <td>59,502</td>
+      <td>59,502</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>34</td>
+      <td>Zhonggu Logistics Corp.</td>
+      <td>55,725</td>
+      <td>55,725</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>35</td>
+      <td>FESCO</td>
+      <td>54,568</td>
+      <td>54,568</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>36</td>
+      <td>Arkas Line / EMES</td>
+      <td>52,632</td>
+      <td>52,632</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.2%</td>
+      <td>0.2%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>37</td>
+      <td>Seaboard Marine</td>
+      <td>48,848</td>
+      <td>48,848</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>38</td>
+      <td>Samudera</td>
+      <td>44,850</td>
+      <td>44,850</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>39</td>
+      <td>Akkon Lines</td>
+      <td>44,793</td>
+      <td>44,793</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>40</td>
+      <td>Meratus</td>
+      <td>44,038</td>
+      <td>44,038</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>41</td>
+      <td>Tailwind Shipping Lines</td>
+      <td>43,406</td>
+      <td>43,406</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>42</td>
+      <td>Namsung Shipping</td>
+      <td>39,768</td>
+      <td>39,768</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>43</td>
+      <td>Tanto Intim Line</td>
+      <td>38,554</td>
+      <td>38,554</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>44</td>
+      <td>Shandong Marine Corporation</td>
+      <td>31,246</td>
+      <td>31,246</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>45</td>
+      <td>Salam Pacific Indonesia Lines</td>
+      <td>31,010</td>
+      <td>31,010</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>46</td>
+      <td>Great White Fleet</td>
+      <td>29,973</td>
+      <td>29,973</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>47</td>
+      <td>Linea Messina</td>
+      <td>27,682</td>
+      <td>27,682</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>48</td>
+      <td>Sea Legend Shipping</td>
+      <td>21,556</td>
+      <td>21,556</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>49</td>
+      <td>Dole Ocean Liner</td>
+      <td>21,150</td>
+      <td>21,150</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>50</td>
+      <td>Chun Kyung (CK Line)</td>
+      <td>20,211</td>
+      <td>20,211</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>51</td>
+      <td>Hainan Yangpu Newnew Shipping</td>
+      <td>19,470</td>
+      <td>19,470</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>52</td>
+      <td>Crowley Liner Services</td>
+      <td>19,142</td>
+      <td>19,142</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>53</td>
+      <td>Kawa Shipping</td>
+      <td>18,644</td>
+      <td>18,644</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>54</td>
+      <td>Asean Seas Line</td>
+      <td>18,508</td>
+      <td>18,508</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>55</td>
+      <td>Tropical Shg / TOTE Maritime</td>
+      <td>18,203</td>
+      <td>18,203</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>56</td>
+      <td>Shipping Corp. of India</td>
+      <td>17,834</td>
+      <td>17,834</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>57</td>
+      <td>Temas Line</td>
+      <td>17,743</td>
+      <td>17,743</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>58</td>
+      <td>Bengal Tiger Line</td>
+      <td>17,635</td>
+      <td>17,635</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.1%</td>
+      <td>0.1%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>59</td>
+      <td>Taicang Container Lines</td>
+      <td>17,202</td>
+      <td>17,202</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>60</td>
+      <td>MTT Shipping</td>
+      <td>15,917</td>
+      <td>15,917</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>61</td>
+      <td>Transworld Group Singapore</td>
+      <td>14,922</td>
+      <td>14,922</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>62</td>
+      <td>Boluda Lines</td>
+      <td>14,629</td>
+      <td>14,629</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>63</td>
+      <td>Cool Carriers</td>
+      <td>14,217</td>
+      <td>14,217</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>64</td>
+      <td>Turkon Line</td>
+      <td>13,857</td>
+      <td>13,857</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>65</td>
+      <td>Eimskip</td>
+      <td>13,069</td>
+      <td>13,069</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>66</td>
+      <td>Pasha Hawaii Transport Lines</td>
+      <td>12,903</td>
+      <td>12,903</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>67</td>
+      <td>Independent Container Line</td>
+      <td>12,398</td>
+      <td>12,398</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>68</td>
+      <td>Caribbean Feeder Services</td>
+      <td>12,090</td>
+      <td>12,090</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>69</td>
+      <td>Peel Ports (BG Freight)</td>
+      <td>12,061</td>
+      <td>12,061</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>70</td>
+      <td>HR Lines</td>
+      <td>11,932</td>
+      <td>11,932</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>71</td>
+      <td>Pan Ocean (Container)</td>
+      <td>11,399</td>
+      <td>11,399</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>72</td>
+      <td>MODUL</td>
+      <td>11,191</td>
+      <td>11,191</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>73</td>
+      <td>Hai An Transport</td>
+      <td>11,057</td>
+      <td>11,057</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>74</td>
+      <td>Qatar Navigation (Milaha)</td>
+      <td>10,939</td>
+      <td>10,939</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>75</td>
+      <td>King Ocean</td>
+      <td>10,853</td>
+      <td>10,853</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>76</td>
+      <td>Greta Shipping</td>
+      <td>10,516</td>
+      <td>10,516</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>77</td>
+      <td>Philippine Span Asia Carrier Corp.</td>
+      <td>10,143</td>
+      <td>10,143</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>78</td>
+      <td>Neptune Pacific Direct Line</td>
+      <td>9,783</td>
+      <td>9,783</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>79</td>
+      <td>Imoto Lines</td>
+      <td>9,295</td>
+      <td>9,295</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>80</td>
+      <td>Pan Continental Shg</td>
+      <td>9,288</td>
+      <td>9,288</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>81</td>
+      <td>Borchard Lines</td>
+      <td>9,284</td>
+      <td>9,284</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>82</td>
+      <td>Dalian Trawind Marine Co</td>
+      <td>9,272</td>
+      <td>9,272</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>83</td>
+      <td>Dalian Jifa Bohai Rim Container L.</td>
+      <td>9,082</td>
+      <td>9,082</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>84</td>
+      <td>Sea Express Shipping Lines</td>
+      <td>8,865</td>
+      <td>8,865</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>85</td>
+      <td>Vistar Shipping LLC</td>
+      <td>8,611</td>
+      <td>8,611</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>86</td>
+      <td>Q Express Line Sdn Bhd</td>
+      <td>8,458</td>
+      <td>8,458</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>87</td>
+      <td>GS Lines</td>
+      <td>8,154</td>
+      <td>8,154</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>88</td>
+      <td>Transit LLC</td>
+      <td>8,092</td>
+      <td>8,092</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>89</td>
+      <td>Irish Continental Group</td>
+      <td>8,041</td>
+      <td>8,041</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>90</td>
+      <td>EAS Datong</td>
+      <td>8,017</td>
+      <td>8,017</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>91</td>
+      <td>Oceanic Cargo Lines</td>
+      <td>7,970</td>
+      <td>7,970</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>92</td>
+      <td>OVP Shipping</td>
+      <td>7,774</td>
+      <td>7,774</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>93</td>
+      <td>Safetrans Shipping</td>
+      <td>7,772</td>
+      <td>7,772</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>94</td>
+      <td>Harbour-Link Group Bhd</td>
+      <td>7,687</td>
+      <td>7,687</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>95</td>
+      <td>Del Monte Fresh Produce Co</td>
+      <td>7,656</td>
+      <td>7,656</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>96</td>
+      <td>Panda Express Line</td>
+      <td>7,628</td>
+      <td>7,628</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>97</td>
+      <td>Kambara Kisen</td>
+      <td>7,566</td>
+      <td>7,566</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>98</td>
+      <td>Tarros</td>
+      <td>7,323</td>
+      <td>7,323</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>99</td>
+      <td>Folk Maritime</td>
+      <td>7,184</td>
+      <td>7,184</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+    <tr>
+      <td>100</td>
+      <td>Sea Lead Shipping</td>
+      <td>7,157</td>
+      <td>7,157</td>
+      <td><span class="delta-zero">0</span></td>
+      <td>0.0%</td>
+      <td>0.0%</td>
+      <td><span class="delta-zero">0.0%p</span></td>
+      <td><span class="delta-zero">-</span></td>
+    </tr>
+  </tbody>
+</table></div></div>
+    
+  </div>
+
+  <div class="footer">Current market overview based on publicly available Alphaliner data.</div>
+</body>
+</html>
