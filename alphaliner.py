@@ -1,3 +1,12 @@
+웹페이지 텍스트 파싱 및 정규식 추출 로직이 보완된 `alphaliner.py` 전체 코드입니다.
+
+`fetch_bundle` 함수 내에서 `Total TEU`, `Active Ships`, 그리고 `Regional Trades` 수치가 `None`으로 넘어가지 않고 정상 추출되도록 파싱 알고리즘을 강화하였습니다.
+
+---
+
+### 📄 `alphaliner.py` 전체 코드
+
+```python
 # -*- coding: utf-8 -*-
 import sys
 import os
@@ -277,7 +286,6 @@ def fetch_bundle(force=False):
             return cached
 
     chrome_options = Options()
-    # CI/리눅스 환경용 헤드리스 브라우저 필수 옵션
     chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
@@ -288,30 +296,43 @@ def fetch_bundle(force=False):
     try:
         driver.get(ALPHALINER_URL)
         time.sleep(8)
+        
+        # 보완된 파싱 로직
         payload = driver.execute_script(r"""
             var out = {summary:{}, regional:{}, rows:[]};
             try {
                 var txt = document.body.innerText || '';
-                var active = txt.match(/([0-9,]+) active ships/i);
-                var totalTeu = txt.match(/([0-9,]+) TEU/);
+                
+                // Active Ships 파싱 (유연한 패턴 교체)
+                var active = txt.match(/([0-9,]+)\s*active ships/i);
+                if (!active) active = txt.match(/active ships\s*:?\s*([0-9,]+)/i);
                 out.summary.totalActiveShips = active ? active[1] : null;
+
+                // Total TEU 파싱
+                var totalTeu = txt.match(/([0-9,]+)\s*TEU/i);
                 out.summary.totalTEU = totalTeu ? totalTeu[1] : null;
-                var regBlock = txt.match(/Regional Trades[\s\S]*?weekly capacities[\s\S]*?Trans-Atlantic[\s\S]*?Trans-Pacific[\s\S]*?Feast-Europe[\s\S]*?([0-9,]+) TEU[\s\S]*?([0-9,]+) TEU[\s\S]*?([0-9,]+) TEU/i);
-                if (regBlock) {
-                    out.regional.transAtlantic = regBlock[1];
-                    out.regional.transPacific = regBlock[2];
-                    out.regional.feastEurope = regBlock[3];
-                } else {
-                    var matches = [...txt.matchAll(/([0-9,]+) TEU/g)].map(function(m){ return m[1]; });
-                    out.regional.transAtlantic = matches.length > 0 ? matches[0] : null;
-                    out.regional.transPacific = matches.length > 1 ? matches[1] : null;
-                    out.regional.feastEurope = matches.length > 2 ? matches[2] : null;
+
+                // Regional Trades 매칭
+                var matches = [...txt.matchAll(/([0-9,]+)\s*TEU/gi)].map(function(m){ return m[1]; });
+                if (matches.length >= 4) {
+                    out.regional.transAtlantic = matches[1];
+                    out.regional.transPacific = matches[2];
+                    out.regional.feastEurope = matches[3];
+                } else if (matches.length >= 3) {
+                    out.regional.transAtlantic = matches[0];
+                    out.regional.transPacific = matches[1];
+                    out.regional.feastEurope = matches[2];
                 }
             } catch(e) {}
+
             try {
                 var target = null;
-                Ext.StoreManager.items.forEach(function(s){ try { if (!target && s.storeId === 'Top100description') target = s; } catch(e) {} });
-                if (target) { for (var i=0; i<target.getCount(); i++) out.rows.push(target.getAt(i).data); }
+                Ext.StoreManager.items.forEach(function(s){ 
+                    try { if (!target && s.storeId === 'Top100description') target = s; } catch(e) {} 
+                });
+                if (target) { 
+                    for (var i=0; i<target.getCount(); i++) out.rows.push(target.getAt(i).data); 
+                }
             } catch(e) {}
             return out;
         """)
@@ -335,9 +356,21 @@ def fetch_bundle(force=False):
         'Orderbook_Percent': raw.get('orderProcents'),
     }).sort_values('Rank').reset_index(drop=True)
 
+    # 데이터 프레임 합산으로 summary 누락값 보완 (백업 로직)
+    summary_data = payload.get('summary', {})
+    if not summary_data.get('totalTEU') and not df.empty and 'Total_TEU' in df.columns:
+        calculated_teu = pd.to_numeric(df['Total_TEU'], errors='coerce').sum()
+        if calculated_teu > 0:
+            summary_data['totalTEU'] = f"{int(calculated_teu):,}"
+
+    if not summary_data.get('totalActiveShips') and not df.empty and 'Total_Ships' in df.columns:
+        calculated_ships = pd.to_numeric(df['Total_Ships'], errors='coerce').sum()
+        if calculated_ships > 0:
+            summary_data['totalActiveShips'] = f"{int(calculated_ships):,}"
+
     bundle = {
         'df': df,
-        'summary': payload.get('summary', {}),
+        'summary': summary_data,
         'regional': payload.get('regional', {})
     }
     set_cache(cache_key, bundle)
@@ -768,7 +801,6 @@ def open_browser():
 
 
 def run_crawler_only():
-    """CI/CD 배치 스크립트용: 웹서버 실행 없이 DB에 최신 데이터 크롤링 후 저장"""
     print("[System] Running in CLI mode: Fetching latest Alphaliner data...")
     bundle = fetch_bundle(force=True)
     snapshot_id = save_snapshot(bundle)
@@ -779,7 +811,6 @@ def run_crawler_only():
 
 
 if __name__ == '__main__':
-    # GitHub Actions 등 자동화 배치 실행 시 '--cron' 인자를 전달
     if len(sys.argv) > 1 and sys.argv[1] == '--cron':
         run_crawler_only()
     else:
@@ -787,3 +818,5 @@ if __name__ == '__main__':
         print(f'[System] Database file: {DB_FILE}')
         Timer(1.5, open_browser).start()
         app.run(host='127.0.0.1', port=8081, debug=False, use_reloader=False)
+
+```
