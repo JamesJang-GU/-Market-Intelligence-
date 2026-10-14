@@ -1,0 +1,90 @@
+
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta charset="utf-8">
+
+<title>Alphaliner Dashboard</title>
+
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+<style>
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f8;
+    padding: 40px;
+}
+
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 0 10px rgba(0,0,0,.1);
+}
+
+h1 {
+    color: #1f2937;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>Alphaliner Market Dashboard</h1>
+
+<div class="card">
+
+<h2>Latest Snapshot</h2>
+
+<p><b>Snapshot ID:</b> 8</p>
+
+<p><b>Date:</b> 2026-10-14 02:04:20</p>
+
+<p><b>Total TEU:</b> None</p>
+
+<p><b>Active Ships:</b> None</p>
+
+</div>
+
+<div class="card">
+
+<h2>Total TEU Trend</h2>
+
+<div id="teuChart"></div>
+
+</div>
+
+<script>
+
+var trace = {
+
+    x: ['2026-05-26 10:09:35', '2026-05-30 18:15:05', '2026-06-23 08:50:09', '2026-09-11 09:45:54', '2026-09-17 10:50:14', '2026-09-22 10:15:31', '2026-09-29 09:24:52', '2026-10-14 02:04:20'],
+
+    y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+
+    type: 'scatter',
+
+    mode: 'lines+markers',
+
+    line: {
+        color: '#2563eb'
+    }
+
+};
+
+Plotly.newPlot(
+    'teuChart',
+    [trace]
+);
+
+</script>
+
+</body>
+
+</html>
