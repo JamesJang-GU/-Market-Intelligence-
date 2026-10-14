@@ -59,6 +59,12 @@ if __name__ == "__main__":
         f"Rows collected : {len(bundle['df'])}"
     )
 
+    print("Summary")
+    print(bundle.get("summary", {}))
+
+    print("Regional")
+    print(bundle.get("regional", {}))
+
     snapshot_id = save_snapshot(bundle)
 
     print(
@@ -68,12 +74,16 @@ if __name__ == "__main__":
     meta = get_snapshot_meta(snapshot_id)
 
     if meta:
+
         print(
-            f"Total TEU : {meta['total_teu']}"
+            f"Active Ships : {meta.get('active_ships')}"
         )
 
         print(
-            f"Active Ships : {meta['active_ships']}"
+            f"Total TEU : {meta.get('total_teu')}"
         )
 
+    print("=" * 60)
+    print("UPDATE COMPLETED")
+    print("=" * 60)
     print("Update Completed")
