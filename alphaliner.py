@@ -1,12 +1,3 @@
-웹페이지 텍스트 파싱 및 정규식 추출 로직이 보완된 `alphaliner.py` 전체 코드입니다.
-
-`fetch_bundle` 함수 내에서 `Total TEU`, `Active Ships`, 그리고 `Regional Trades` 수치가 `None`으로 넘어가지 않고 정상 추출되도록 파싱 알고리즘을 강화하였습니다.
-
----
-
-### 📄 `alphaliner.py` 전체 코드
-
-```python
 # -*- coding: utf-8 -*-
 import sys
 import os
