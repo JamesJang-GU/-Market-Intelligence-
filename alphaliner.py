@@ -47,11 +47,19 @@ def fetch_bundle(force=True):
     finally:
         driver.quit()
 
-if __name__=='__main__':
-    print('ALPHALINER WEEKLY UPDATE')
-    payload=fetch_bundle(True)
-    print('Rows collected:', len(payload.get('rows',[])))
+if __name__ == "__main__":
 
-print(bundle["df"].head())
+    print("ALPHALINER WEEKLY UPDATE")
 
-print(f"Rows collected : {len(bundle['df'])}")
+    payload = fetch_bundle(True)
+
+    print(
+        "Rows collected:",
+        len(payload.get("rows", []))
+    )
+
+    print("Summary")
+    print(payload.get("summary"))
+
+    print("Regional")
+    print(payload.get("regional"))
