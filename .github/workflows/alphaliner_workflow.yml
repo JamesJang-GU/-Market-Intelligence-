@@ -5,7 +5,6 @@ on:
     - cron: '0 0 * * 1'
   workflow_dispatch:
 
-# 봇 권한 부여 (추가된 부분)
 permissions:
   contents: write
 
@@ -33,9 +32,10 @@ jobs:
         run: |
           python alphaliner.py --cron
 
-      - name: Commit and Push DB
+      # DB 파일과 함께 생성된 index.html을 Git에 커밋 & 푸시
+      - name: Commit and Push DB and HTML
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add alphaliner_history.db
-          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update alphaliner_history.db" && git push)
+          git add alphaliner_history.db index.html
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update alphaliner_history.db and index.html" && git push)
