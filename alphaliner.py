@@ -1,3 +1,32 @@
+과거 DB의 정상 스냅샷 필터링 로직이 추가된 **`alphaliner.py` 전체 코드**와 함께, **매주 월요일 자동 실행 및 데이터 누적 구조 점검 결과**를 정리해 드립니다.
+
+---
+
+### 🔍 매주 월요일 데이터 누적 및 변동 확인 점검 결과
+
+1. **자동 누적 여부 (정상 🟢)**
+* YML 설정의 `cron: '0 0 * * 1'`에 따라 매주 월요일 UTC 00:00(한국 시간 09:00)에 GitHub Actions가 실행됩니다.
+* 크롤링 실행 시 `save_snapshot()`이 호출되어 `snapshot_master`(스냅샷 목록) 및 `snapshot_detail`(100개 선사 세부 수치) 테이블에 새로운 `snapshot_id`로 자동 누적 저장됩니다.
+
+
+* 작업 완료 후 `git add alphaliner_history.db`를 거쳐 repository로 커밋/푸시되므로 **데이터는 덮어씌워지지 않고 계속 누적**됩니다.
+
+
+2. **주간 변동량(Previous Snapshot Delta) 산출 구조 (개선 완료 🟢)**
+* 아래 코드에서는 `total_teu`가 `None`이나 빈값으로 잘못 저장된 과거 오류 데이터는 자동으로 건너뛰도록 처리했습니다.
+
+
+* 이전 주 월요일(또는 직전 정상 수집일)의 데이터와 금주 새로 수집된 데이터를 선사명(`Operator`) 기준으로 자동으로 매칭(LEFT JOIN)하여 fleet TEU 변동량, 점유율 변동(%p), 순위 변동($\Delta$)을 자동으로 계산합니다.
+
+
+
+
+
+---
+
+### 📄 `alphaliner.py` 최종 전체 코드
+
+```python
 # -*- coding: utf-8 -*-
 import sys
 import os
@@ -117,7 +146,7 @@ def save_snapshot(bundle):
         regional = bundle.get('regional', {})
         df = bundle['df'].copy()
 
-        # 데이터가 비어있거나 summary가 None이면 저장 스킵
+        # 데이터가 비어있거나 summary가 None이면 DB에 저장하지 않음
         if df.empty or not summary.get('totalTEU') or summary.get('totalTEU') == 'None':
             print("[Warning] Parsed data is incomplete. Skipping DB save.")
             conn.close()
@@ -126,7 +155,7 @@ def save_snapshot(bundle):
         snapshot_hash = make_snapshot_hash(bundle)
         cur = conn.cursor()
         
-        # None 수치가 포함된 이전 해시는 중복 검사 대상에서 제외
+        # 정상 수치 스냅샷 중 완전 중복인 경우 기존 snapshot_id 반환
         cur.execute('SELECT snapshot_id FROM snapshot_master WHERE snapshot_hash = ? AND total_teu IS NOT NULL AND total_teu != "None"', (snapshot_hash,))
         row = cur.fetchone()
         if row:
@@ -226,7 +255,17 @@ def get_previous_snapshot_id(current_snapshot_id):
         return None
     conn = get_db_conn()
     cur = conn.cursor()
-    cur.execute('SELECT snapshot_id FROM snapshot_master WHERE captured_at < ? ORDER BY captured_at DESC, snapshot_id DESC LIMIT 1', (meta['captured_at'],))
+    # 정상 데이터 수치(None이 아닌 스냅샷) 중 바로 직전 스냅샷 조회
+    cur.execute('''
+        SELECT snapshot_id 
+        FROM snapshot_master 
+        WHERE captured_at < ? 
+          AND total_teu IS NOT NULL 
+          AND total_teu != '' 
+          AND total_teu != 'None' 
+        ORDER BY captured_at DESC, snapshot_id DESC 
+        LIMIT 1
+    ''', (meta['captured_at'],))
     row = cur.fetchone()
     conn.close()
     return row[0] if row else None
@@ -258,25 +297,39 @@ def get_snapshot_id_by_mode(current_snapshot_id, compare_mode='previous', custom
     cur = conn.cursor()
     current_meta = get_snapshot_meta(current_snapshot_id)
     current_captured = current_meta['captured_at'] if current_meta else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     if compare_mode == '1m':
         target = (datetime.datetime.strptime(current_captured, '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-        cur.execute('SELECT snapshot_id FROM snapshot_master WHERE captured_at <= ? ORDER BY captured_at DESC LIMIT 1', (target,))
+        cur.execute('''
+            SELECT snapshot_id FROM snapshot_master 
+            WHERE captured_at <= ? AND total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None'
+            ORDER BY captured_at DESC LIMIT 1
+        ''', (target,))
     elif compare_mode == '3m':
         target = (datetime.datetime.strptime(current_captured, '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
-        cur.execute('SELECT snapshot_id FROM snapshot_master WHERE captured_at <= ? ORDER BY captured_at DESC LIMIT 1', (target,))
+        cur.execute('''
+            SELECT snapshot_id FROM snapshot_master 
+            WHERE captured_at <= ? AND total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None'
+            ORDER BY captured_at DESC LIMIT 1
+        ''', (target,))
     elif compare_mode == 'custom' and custom_date:
         try:
             target = datetime.datetime.strptime(custom_date, '%Y-%m-%d').strftime('%Y-%m-%d 23:59:59')
-            cur.execute('SELECT snapshot_id FROM snapshot_master WHERE captured_at <= ? ORDER BY captured_at DESC LIMIT 1', (target,))
+            cur.execute('''
+                SELECT snapshot_id FROM snapshot_master 
+                WHERE captured_at <= ? AND total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None'
+                ORDER BY captured_at DESC LIMIT 1
+            ''', (target,))
         except Exception:
             conn.close()
             return get_previous_snapshot_id(current_snapshot_id)
     else:
         conn.close()
         return get_previous_snapshot_id(current_snapshot_id)
+        
     row = cur.fetchone()
     conn.close()
-    return row[0] if row else None
+    return row[0] if row else get_previous_snapshot_id(current_snapshot_id)
 
 
 def fetch_bundle(force=False):
@@ -813,3 +866,5 @@ if __name__ == '__main__':
         print(f'[System] Database file: {DB_FILE}')
         Timer(1.5, open_browser).start()
         app.run(host='127.0.0.1', port=8081, debug=False, use_reloader=False)
+
+```
