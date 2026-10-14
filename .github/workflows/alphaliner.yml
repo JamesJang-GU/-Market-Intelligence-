@@ -2,21 +2,16 @@ name: Alphaliner Weekly Update v3
 
 on:
   workflow_dispatch:
-
   schedule:
     - cron: '0 23 * * 0'
 
 jobs:
-
   update:
-
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
 
     steps:
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -33,17 +28,17 @@ jobs:
         run: |
           python alphaliner.py
 
-      - name: Commit DB
+      - name: Build Dashboard
+        run: |
+          python dashboard_generator.py
+
+      - name: Commit DB and Dashboard
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@users.noreply.github.com"
-
           git add alphaliner_history.db
-
+          git add dashboard.html
           git diff --cached --quiet || (
-            git commit -m "Auto update DB"
+            git commit -m "Auto update dashboard"
             git push
           )
-      - name: Echo Test
-        run: |
-          echo "HELLO GITHUB ACTIONS"
