@@ -1,24 +1,40 @@
 name: Alphaliner Weekly Update
+
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 23 * * 0'
+    - cron: '0 0 * * 1' # 매주 월요일 실행
+  workflow_dispatch:
+
 jobs:
   update:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - uses: browser-actions/setup-chrome@v1
-      - run: pip install -r requirements.txt
-      - run: python alphaliner.py
-      - run: python dashboard_generator.py
-      - run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@users.noreply.github.com'
-          git add *.db dashboard.html
-          git diff --cached --quiet || (git commit -m 'Auto update dashboard' && git push)
+          python-version: '3.10'
+
+      # 1. GitHub Runner에 Google Chrome 설치 (필수)
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 2. --cron 옵션을 반드시 붙여서 실행 (웹서버 무한대기 방지)
+      - name: Run Crawler
+        run: |
+          python alphaliner.py --cron
+
+      # 3. 변경된 DB 파일 Git Commit & Push
+      - name: Commit and Push DB
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add alphaliner_history.db
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update alphaliner_history.db" && git push)
