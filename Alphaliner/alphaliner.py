@@ -822,10 +822,10 @@ def run_crawler_only():
     else:
         print("[System] Snapshot already exists or failed to save.")
 
-    print("[System] Generating static index.html for GitHub Pages...")
+    print("[System] Generating static alphaliner.html for GitHub Pages...")
     with app.test_request_context('/'):
         html_content = index()
-        with open(os.path.join(BASE_DIR, 'index.html'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(BASE_DIR, 'alphaliner.html'), 'w', encoding='utf-8') as f:
             f.write(html_content)
     print("[System] Static index.html generated successfully!")
 
