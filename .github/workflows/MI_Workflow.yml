@@ -1,9 +1,16 @@
+`Alphaliner`, `TAC Index` 등 하위 폴더 크롤러 실행부터 `dashboard_generator.py`를 통한 메인 포털 생성, 그리고 자동 커밋/푸시까지 완벽하게 처리하는 **통합 워크플로우 YML 전체 코드**입니다.
+
+`.github/workflows/` 폴더 내의 YML 파일(예: `market_intelligence_workflow.yml` 또는 기존 `alphaliner_workflow.yml`) 전체를 아래 코드로 교체해 주시면 됩니다.
+
+---
+
+```yaml
 name: Market Intelligence Weekly Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # 매주 월요일 UTC 00:00 (한국시간 09:00)
-  workflow_dispatch:
+    - cron: '0 0 * * 1' # 매주 월요일 UTC 00:00 (한국시간 오전 09:00)
+  workflow_dispatch:      # 수동 실행 버튼(Run workflow) 활성화
 
 permissions:
   contents: write
@@ -29,9 +36,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
 
-      # 1. Alphaliner 크롤러 실행 (폴더 위치에 따라 자동 대응)
+      # 1. Alphaliner 크롤러 실행 (폴더 위치 자동 감지)
       - name: Run Alphaliner Crawler
         run: |
           if [ -f "Alphaliner/alphaliner.py" ]; then
@@ -47,17 +54,19 @@ jobs:
             python "TAC Index/TAC_Index.py" --cron
           fi
 
-      # 3. (선택) 통합 포털 메인 생성기가 있는 경우 실행
-      - name: Generate Index Portal
+      # 3. 통합 메인 대시보드 포털 생성 (dashboard_generator.py 실행)
+      - name: Generate Main Dashboard Portal
         run: |
-          if [ -f "generate_index.py" ]; then
-            python generate_index.py
+          if [ -f "dashboard_generator.py" ]; then
+            python dashboard_generator.py
           fi
 
-      # 4. 새로 업데이트된 모든 DB 파일과 HTML을 Git에 커밋 & 푸시
-      - name: Commit and Push All DBs and HTMLs
+      # 4. 새로 업데이트된 모든 DB 및 HTML 파일 커밋 & 푸시
+      - name: Commit and Push All Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update market intelligence databases and htmls" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update market intelligence data and htmls" && git push)
+
+```
