@@ -1,8 +1,8 @@
-name: Alphaliner Weekly Update
+name: Market Intelligence Weekly Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * 1' # 매주 월요일 UTC 00:00 (한국시간 09:00)
   workflow_dispatch:
 
 permissions:
@@ -14,6 +14,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,14 +31,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Crawler
+      # 1. Alphaliner 크롤러 실행 (폴더 위치에 따라 자동 대응)
+      - name: Run Alphaliner Crawler
         run: |
-          python alphaliner.py --cron
+          if [ -f "Alphaliner/alphaliner.py" ]; then
+            python "Alphaliner/alphaliner.py" --cron
+          elif [ -f "alphaliner.py" ]; then
+            python alphaliner.py --cron
+          fi
 
-      # DB 파일과 함께 생성된 index.html을 Git에 커밋 & 푸시
-      - name: Commit and Push DB and HTML
+      # 2. TAC Index 크롤러 실행
+      - name: Run TAC Index Crawler
+        run: |
+          if [ -f "TAC Index/TAC_Index.py" ]; then
+            python "TAC Index/TAC_Index.py" --cron
+          fi
+
+      # 3. (선택) 통합 포털 메인 생성기가 있는 경우 실행
+      - name: Generate Index Portal
+        run: |
+          if [ -f "generate_index.py" ]; then
+            python generate_index.py
+          fi
+
+      # 4. 새로 업데이트된 모든 DB 파일과 HTML을 Git에 커밋 & 푸시
+      - name: Commit and Push All DBs and HTMLs
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add alphaliner_history.db index.html
-          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update alphaliner_history.db and index.html" && git push)
+          git add .
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update market intelligence databases and htmls" && git push)
