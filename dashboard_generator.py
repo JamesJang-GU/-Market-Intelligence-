@@ -5,7 +5,7 @@ import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 1. Alphaliner 최신 데이터 가져오기
+# 1. Alphaliner 최신 데이터 조회
 def get_latest_alphaliner():
     db_path = os.path.join(BASE_DIR, 'Alphaliner', 'alphaliner_history.db')
     if not os.path.exists(db_path):
@@ -13,7 +13,7 @@ def get_latest_alphaliner():
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute("SELECT captured_at, active_ships, total_teu FROM snapshot_master WHERE total_teu IS NOT NULL AND total_teu != '' ORDER BY snapshot_id DESC LIMIT 1")
+        cur.execute("SELECT captured_at, active_ships, total_teu FROM snapshot_master WHERE total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None' ORDER BY snapshot_id DESC LIMIT 1")
         row = cur.fetchone()
         conn.close()
         if row:
@@ -22,7 +22,7 @@ def get_latest_alphaliner():
         pass
     return {"date": "-", "ships": "-", "teu": "-"}
 
-# 2. TAC Index 최신 데이터 가져오기
+# 2. TAC Index 최신 데이터 조회
 def get_latest_tac():
     db_path = os.path.join(BASE_DIR, 'TAC Index', 'TAC_Index.db')
     if not os.path.exists(db_path):
@@ -39,7 +39,7 @@ def get_latest_tac():
         pass
     return {"date": "-", "index": "-", "change": "-"}
 
-# 3. 통합 index.html 빌드
+# 3. 통합 index.html 메인 포털 생성
 def build_portal_index():
     alpha = get_latest_alphaliner()
     tac = get_latest_tac()
@@ -67,12 +67,53 @@ body {{
   background: var(--bg);
   color: var(--text);
   max-width: 1280px;
-  margin: 30px auto;
-  padding: 0 20px;
+  margin: 0 auto;
+  padding: 0 20px 40px 20px;
   line-height: 1.5;
 }}
+
+/* 상단 상시 고정 네비게이션 메뉴바 (GNB) */
+.navbar {{
+  background: var(--primary);
+  margin: 0 -20px 30px -20px;
+  padding: 14px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  flex-wrap: wrap;
+  gap: 12px;
+}}
+.nav-brand {{
+  color: white;
+  font-size: 20px;
+  font-weight: 800;
+  text-decoration: none;
+}}
+.nav-menu {{
+  display: flex;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}}
+.nav-item a {{
+  color: #e0f2fe;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+}}
+.nav-item a:hover, .nav-item a.active {{
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}}
+
 .header {{
-  border-bottom: 3px solid var(--primary);
+  border-bottom: 2px solid var(--border);
   padding-bottom: 16px;
   margin-bottom: 30px;
   display: flex;
@@ -81,8 +122,10 @@ body {{
   flex-wrap: wrap;
   gap: 12px;
 }}
-h1 {{ margin: 0; color: var(--primary); font-size: 28px; font-weight: 800; }}
+h1 {{ margin: 0; color: var(--primary); font-size: 26px; font-weight: 800; }}
 .updated {{ font-size: 13px; color: var(--muted); font-weight: 600; }}
+
+/* 대시보드 요약 카드 그리드 */
 .grid {{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -119,7 +162,6 @@ h1 {{ margin: 0; color: var(--primary); font-size: 28px; font-weight: 800; }}
 }}
 .badge-ocean {{ background: #e0f2fe; color: #0369a1; }}
 .badge-air {{ background: #f0fdf4; color: #15803d; }}
-.badge-econ {{ background: #fef3c7; color: #b45309; }}
 
 .metric-body {{ margin-bottom: 20px; }}
 .metric-label {{ font-size: 13px; color: var(--muted); font-weight: 600; }}
@@ -144,33 +186,43 @@ h1 {{ margin: 0; color: var(--primary); font-size: 28px; font-weight: 800; }}
 </head>
 <body>
 
+  <!-- 상단 메뉴바 (메뉴에서 클릭해서 바로 이동) -->
+  <nav class="navbar">
+    <a href="./index.html" class="nav-brand">🌐 Market Intelligence</a>
+    <ul class="nav-menu">
+      <li class="nav-item"><a href="./index.html" class="active">홈 (Portal)</a></li>
+      <li class="nav-item"><a href="./alphaliner.html">🚢 Alphaliner</a></li>
+      <li class="nav-item"><a href="./TAC_Index.html">✈️ TAC Index</a></li>
+    </ul>
+  </nav>
+
   <div class="header">
     <div>
-      <h1>🌐 Market Intelligence Portal</h1>
-      <div class="updated">해운 · 항공 · 거시경제 통합 대시보드</div>
+      <h1>Market Intelligence Hub</h1>
+      <div class="updated">해운, 항공, 물류 지표 통합 모니터링 포털</div>
     </div>
     <div class="updated">Last Updated: {updated_at}</div>
   </div>
 
   <div class="grid">
     
-    <!-- 🚢 1. Alphaliner (컨테이너 선대) -->
+    <!-- 🚢 1. Alphaliner (컨테이너 선대) 카드 -->
     <div class="card">
       <div>
         <div class="card-header">
           <h2 class="card-title">Alphaliner Top 100</h2>
-          <span class="badge badge-ocean">Ocean Container</span>
+          <span class="badge badge-ocean">Container</span>
         </div>
         <div class="metric-body">
           <div class="metric-label">Global Fleet Capacity</div>
           <div class="metric-val">{alpha['teu']} <span style="font-size: 16px; font-weight: 600;">TEU</span></div>
-          <div class="metric-sub">Active Ships: <b>{alpha['ships']}</b> vessels ({alpha['date']})</div>
+          <div class="metric-sub">Active Vessels: <b>{alpha['ships']}</b> ({alpha['date']})</div>
         </div>
       </div>
-      <a href="./alphaliner.html" class="btn-link">Alphaliner 대시보드 보기 →</a>
+      <a href="./alphaliner.html" class="btn-link">Alphaliner 상세 대시보드 →</a>
     </div>
 
-    <!-- ✈️ 2. TAC Index (항공 운임) -->
+    <!-- ✈️ 2. TAC Index (항공 운임) 카드 -->
     <div class="card">
       <div>
         <div class="card-header">
@@ -178,28 +230,12 @@ h1 {{ margin: 0; color: var(--primary); font-size: 28px; font-weight: 800; }}
           <span class="badge badge-air">Air Cargo</span>
         </div>
         <div class="metric-body">
-          <div class="metric-label">Overall Freight Rate Index</div>
+          <div class="metric-label">Overall Rate Index</div>
           <div class="metric-val">{tac['index']}</div>
           <div class="metric-sub">Weekly Change: <b>{tac['change']}%</b> ({tac['date']})</div>
         </div>
       </div>
-      <a href="./TAC_Index.html" class="btn-link">TAC Index 대시보드 보기 →</a>
-    </div>
-
-    <!-- ⚓ 3. Shipping Index (SCFI / BDI) - 추가 시 자동 연동 가능 -->
-    <div class="card">
-      <div>
-        <div class="card-header">
-          <h2 class="card-title">Shipping Freight Index</h2>
-          <span class="badge badge-ocean">SCFI / BDI</span>
-        </div>
-        <div class="metric-body">
-          <div class="metric-label">Container & Dry Bulk Rate</div>
-          <div class="metric-val">SCFI & BDI</div>
-          <div class="metric-sub">상하이 컨테이너 & 발틱 건화물 운임지수</div>
-        </div>
-      </div>
-      <a href="./shipping_index.html" class="btn-link">운임지수 대시보드 보기 →</a>
+      <a href="./TAC_Index.html" class="btn-link">TAC Index 상세 대시보드 →</a>
     </div>
 
   </div>
