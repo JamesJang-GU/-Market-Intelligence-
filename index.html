@@ -1,197 +1,271 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Market Intelligence Portal</title>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>Market Intelligence</title>
 <style>
 :root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --border: #e2e8f0;
-  --primary: #1e3a8a;
-  --text: #0f172a;
-  --muted: #64748b;
-  --accent: #2563eb;
+  color-scheme: light;
+  --page:#eceef1; --surface:#ffffff; --surface2:#f4f6f8; --border:#e2e6ea;
+  --heading:#111827; --text:#374151; --muted:#6b7280;
+  --accent:#d04a02; --accent-soft:#fbf1ec; --accent2:#0f766e; --accent2-soft:#effcf7;
+  --warn:#b45309; --warn-soft:#fff8ec; --code-bg:#f3f4f6; --code-fg:#b0330a;
+  --zebra:#fbfcfd; --pre-bg:#f6f8fa; --pre-fg:#24292f;
+  --bq-border:#f3c9ad; --qbox-border:#cdeee3; --callout-fg:#4b5563;
 }
 * { box-sizing: border-box; }
+/* Alpha Framework 스크롤바 표준 (styles/base/scrollbar.scss 와 동일 값).
+   이 문서는 iframe 안에서 열리므로 앱 전역 스크롤바가 넘어오지 않아 여기서 복제한다.
+   표준 속성은 Firefox 전용 폴백 — webkit 에 새면 Chrome 121+ 가 ::-webkit-scrollbar
+   를 무시하고 네이티브(더 넓은) 스크롤바를 그린다. */
+@supports not selector(::-webkit-scrollbar) {
+  html { scrollbar-width: thin; scrollbar-color: rgba(0, 0, 0, 0.2) transparent; }
+}
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.4); }
 body {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 0 20px 40px 20px;
-  line-height: 1.5;
-}
-
-/* 상단 상시 고정 네비게이션 메뉴바 (GNB) */
-.navbar {
-  background: var(--primary);
-  margin: 0 -20px 30px -20px;
-  padding: 14px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.nav-brand {
-  color: white;
-  font-size: 20px;
-  font-weight: 800;
-  text-decoration: none;
-}
-.nav-menu {
-  display: flex;
-  gap: 10px;
-  list-style: none;
   margin: 0;
-  padding: 0;
-  flex-wrap: wrap;
+  background: var(--page); color: var(--text);
+  font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR',
+               'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 16px; line-height: 1.75; -webkit-font-smoothing: antialiased;
 }
-.nav-item a {
-  color: #e0f2fe;
-  text-decoration: none;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.2s;
+.doc {
+  min-height: 100vh;
+  background: var(--page);
 }
-.nav-item a:hover, .nav-item a.active {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-}
-
-.header {
-  border-bottom: 2px solid var(--border);
-  padding-bottom: 16px;
-  margin-bottom: 30px;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-h1 { margin: 0; color: var(--primary); font-size: 26px; font-weight: 800; }
-.updated { font-size: 13px; color: var(--muted); font-weight: 600; }
-
-/* 대시보드 요약 카드 그리드 */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 24px;
-}
-.card {
+.doc-header {
+  padding: 52px max(24px, calc((100vw - 1040px) / 2 + 24px)) 36px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 24px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border-top: 4px solid var(--accent);
+  border-bottom: 1px solid var(--border);
 }
-.card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+.doc-header .eyebrow {
+  color: var(--accent); font-size: 13px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase;
 }
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+.doc-header h1 { margin: 14px 0 8px; max-width: 960px; font-size: 40px; line-height: 1.15; letter-spacing: 0; color: var(--heading); }
+.doc-header .doc-sub { margin: 0; max-width: 760px; font-size: 18px; color: var(--muted); }
+.doc-header .doc-date {
+  display: inline-block; margin-top: 22px; padding: 6px 12px;
+  font-size: 13px; color: var(--muted);
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 999px;
 }
-.card-title { font-size: 20px; font-weight: 700; color: var(--primary); margin: 0; }
-.badge {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-weight: 700;
-  text-transform: uppercase;
+.doc-header .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.doc-body {
+  width: min(1040px, calc(100% - 48px));
+  margin: 34px auto 64px;
+  padding: 0;
 }
-.badge-ocean { background: #e0f2fe; color: #0369a1; }
-.badge-air { background: #f0fdf4; color: #15803d; }
+h2 {
+  display: flex; align-items: baseline; gap: 12px;
+  margin: 46px 0 16px; padding-bottom: 12px;
+  font-size: 25px; color: var(--heading); border-bottom: 1px solid var(--border);
+}
+h2 .num { color: var(--accent); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
+h3 { margin: 28px 0 10px; font-size: 19px; color: var(--accent2); }
+h4 { margin: 20px 0 8px; font-size: 16px; color: var(--heading); }
+p { margin: 12px 0; color: var(--text); }
+strong { color: var(--heading); }
+em { color: var(--accent2); font-style: normal; }
+ul, ol { padding-left: 24px; }
+li { margin: 7px 0; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(208, 74, 2, .3); }
+a:hover { border-bottom-color: var(--accent); }
+blockquote {
+  margin: 22px 0; padding: 14px 20px;
+  background: var(--accent-soft); border: 1px solid var(--bq-border); border-left: 4px solid var(--accent);
+  border-radius: 8px; color: var(--callout-fg);
+}
+blockquote p { margin: 6px 0; }
+blockquote p:first-child { margin-top: 0; }
+blockquote p:last-child { margin-bottom: 0; }
+code {
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 13px; color: var(--code-fg);
+  background: var(--code-bg); padding: 2px 6px; border-radius: 5px;
+}
+pre {
+  margin: 18px 0; padding: 18px 20px; overflow-x: auto;
+  background: var(--pre-bg); border: 1px solid var(--border); border-radius: 10px;
+}
+pre code { background: none; color: var(--pre-fg); padding: 0; font-size: 13px; line-height: 1.6; }
+table {
+  width: 100%; margin: 20px 0; font-size: 14.5px; border-collapse: collapse; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+th, td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+th { background: var(--surface2); color: var(--heading); font-weight: 700; font-size: 13.5px; }
+tr:last-child td { border-bottom: none; }
+tbody tr:nth-child(even) td { background: var(--zebra); }
+hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+img { max-width: 100%; }
 
-.metric-body { margin-bottom: 20px; }
-.metric-label { font-size: 13px; color: var(--muted); font-weight: 600; }
-.metric-val { font-size: 32px; font-weight: 800; color: var(--text); margin: 6px 0; }
-.metric-sub { font-size: 13px; color: var(--muted); }
+/* ── Component vocabulary (for the content_html path) ──────────────────
+   The agent composes these classes; it never writes CSS. */
+.lead { margin: 20px 0; padding-left: 18px; font-size: 18px; color: var(--heading); border-left: 3px solid var(--accent); }
+.chip { padding: 6px 12px; font-size: 13px; color: var(--muted); background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; }
+.chip strong { color: var(--heading); }
+.pill { display: inline-block; margin-right: 6px; padding: 3px 10px; font-size: 12px; color: var(--muted); background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; }
+.callout { margin: 22px 0; padding: 18px 22px; background: var(--accent-soft); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; }
+.callout.warn { background: var(--warn-soft); border-left-color: var(--warn); }
+.callout.key { background: var(--accent2-soft); border-left-color: var(--accent2); }
+.callout .tag { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.callout.warn .tag { color: var(--warn); }
+.callout.key .tag { color: var(--accent2); }
+.callout > :last-child { margin-bottom: 0; }
+.def-box { margin: 24px 0; padding: 22px 26px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; }
+.def-box .lbl { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+@media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+.card { padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(17, 24, 39, .04); }
+.card h4 { margin-top: 0; }
+.stat { font-size: 30px; font-weight: 800; color: var(--accent); }
+.stat-label { font-size: 13px; color: var(--muted); }
+.pipeline { display: flex; flex-wrap: wrap; gap: 0; margin: 24px 0; align-items: stretch; }
+.stage { position: relative; flex: 1; min-width: 180px; padding: 18px; background: var(--surface2); border: 1px solid var(--border); }
+.stage:not(:last-child) { border-right: none; }
+.stage .step { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+.stage h4 { margin: 6px 0; }
+.stage .arrow { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); z-index: 2; font-size: 20px; color: var(--accent); }
+.principle { display: flex; gap: 16px; margin: 18px 0; align-items: flex-start; }
+.principle .ico { flex: none; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: #fff; background: var(--accent); border-radius: 9px; }
+.principle h4 { margin: 4px 0; }
+.principle p { margin: 0; font-size: 15px; }
+.qbox { margin: 12px 0; padding: 16px 20px; background: var(--accent2-soft); border: 1px solid var(--qbox-border); border-radius: 10px; }
+.qbox q { font-size: 15px; color: var(--accent2); }
 
-.btn-link {
-  display: block;
-  width: 100%;
-  text-align: center;
-  padding: 12px 0;
-  background: var(--accent);
-  color: white;
-  border-radius: 8px;
-  text-decoration: none;
-  font-weight: 700;
-  font-size: 14px;
-  transition: background 0.2s ease;
+/* ── Presentation-grade vocabulary (all themes) ──────────────────────── */
+ol.agenda { margin: 24px 0; padding: 0; list-style: none; counter-reset: agenda; display: grid; gap: 10px; }
+ol.agenda li { counter-increment: agenda; display: flex; align-items: baseline; gap: 14px; margin: 0; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+ol.agenda li::before { content: counter(agenda, decimal-leading-zero); font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.kpi-strip { display: flex; flex-wrap: wrap; gap: 14px; margin: 22px 0; }
+.kpi-strip .kpi { flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 2px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.timeline { display: grid; gap: 18px; margin: 24px 0 24px 6px; padding-left: 22px; border-left: 2px solid var(--border); }
+.timeline .tl-item { position: relative; }
+.timeline .tl-item::before { content: ''; position: absolute; left: -28px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.timeline .tl-date { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.timeline h4 { margin: 2px 0 4px; }
+.timeline p { margin: 0; font-size: 15px; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 22px 0; }
+.compare-col { padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.compare-col h4 { margin: 0 0 10px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+.compare-col.highlight { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.compare-col.highlight h4 { border-bottom-color: var(--accent); color: var(--accent); }
+.quote-hero { margin: 34px 0; padding: 30px 34px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.quote-hero q { display: block; font-size: 24px; line-height: 1.5; color: var(--heading); }
+.quote-hero .who { display: block; margin-top: 12px; font-size: 14px; color: var(--muted); }
+figure.figure { margin: 24px 0; text-align: center; }
+figure.figure img { max-width: 100%; border: 1px solid var(--border); border-radius: 12px; }
+figure.figure figcaption { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
+.takeaway { display: flex; align-items: baseline; gap: 14px; margin: 26px 0; padding: 16px 20px; background: var(--accent-soft); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; }
+.takeaway .tag { flex: none; font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+.takeaway p { margin: 0; font-size: 16.5px; font-weight: 600; color: var(--heading); }
+
+/* ── Auto-generated Table of Contents (injected by the renderer) ─────── */
+html { scroll-behavior: smooth; }
+h2, h3, h4 { scroll-margin-top: 24px; }
+nav.doc-toc {
+  margin: 0 0 34px; padding: 20px 26px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
 }
-.btn-link:hover { background: #1d4ed8; }
+nav.doc-toc .toc-title {
+  margin: 0 0 10px; font-size: 13px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+nav.doc-toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 40px; }
+nav.doc-toc li { margin: 5px 0; break-inside: avoid; }
+nav.doc-toc a { font-size: 14.5px; color: var(--text); border-bottom: none; }
+nav.doc-toc a:hover { color: var(--accent); }
+@media (max-width: 760px) { nav.doc-toc ol { columns: 1; } }
+
+/* ── Print (minimal) ──────────────────────────────────────────────────── */
+@media print {
+  body { background: #fff; }
+  .doc-header { border-top: none; padding: 0 0 20px; }
+  .doc-body { width: 100%; margin: 20px 0 0; }
+  nav.doc-toc, .card, .callout, .def-box, .qbox, .stage { break-inside: avoid; }
+  a { border-bottom: none; color: inherit; }
+}
+
+/* briefing theme: dense executive one-pager */
+body { font-size: 14.5px; line-height: 1.6; }
+.doc-header { padding: 30px max(24px, calc((100vw - 960px) / 2 + 24px)) 22px; }
+.doc-header h1 { font-size: 26px; margin: 8px 0 4px; }
+.doc-header .doc-sub { font-size: 14.5px; }
+.doc-header .doc-date { margin-top: 12px; padding: 4px 10px; font-size: 12px; }
+.doc-body { width: min(960px, calc(100% - 40px)); margin: 22px auto 48px; }
+h2 { margin: 28px 0 10px; padding-bottom: 8px; font-size: 18.5px; }
+h2 .num { font-size: 14px; }
+h3 { margin: 18px 0 6px; font-size: 15.5px; }
+h4 { margin: 12px 0 6px; font-size: 14px; }
+p { margin: 8px 0; }
+li { margin: 4px 0; }
+table { font-size: 13px; margin: 12px 0; }
+th, td { padding: 8px 10px; }
+.card { padding: 12px 14px; }
+.stat { font-size: 24px; }
+.lead { font-size: 15.5px; margin: 12px 0; }
+.callout, .def-box, .takeaway, .qbox { margin: 14px 0; padding: 12px 16px; }
+.takeaway p { font-size: 14.5px; }
+nav.doc-toc { display: none; }
 </style>
 </head>
-<body>
-
-  <!-- 상단 메뉴바 (메뉴에서 클릭해서 바로 이동) -->
-  <nav class="navbar">
-    <a href="./index.html" class="nav-brand">🌐 Market Intelligence</a>
-    <ul class="nav-menu">
-      <li class="nav-item"><a href="./index.html" class="active">홈 (Portal)</a></li>
-      <li class="nav-item"><a href="./alphaliner.html">🚢 Alphaliner</a></li>
-      <li class="nav-item"><a href="./TAC_Index.html">✈️ TAC Index</a></li>
-    </ul>
-  </nav>
-
-  <div class="header">
-    <div>
-      <h1>Market Intelligence Hub</h1>
-      <div class="updated">해운, 항공, 물류 지표 통합 모니터링 포털</div>
-    </div>
-    <div class="updated">Last Updated: 2026-10-15 08:34:38</div>
-  </div>
-
-  <div class="grid">
-    
-    <!-- 🚢 1. Alphaliner (컨테이너 선대) 카드 -->
-    <div class="card">
-      <div>
-        <div class="card-header">
-          <h2 class="card-title">Alphaliner Top 100</h2>
-          <span class="badge badge-ocean">Container</span>
-        </div>
-        <div class="metric-body">
-          <div class="metric-label">Global Fleet Capacity</div>
-          <div class="metric-val">34,898,474 <span style="font-size: 16px; font-weight: 600;">TEU</span></div>
-          <div class="metric-sub">Active Vessels: <b>7,663</b> (2026-10-15)</div>
-        </div>
-      </div>
-      <a href="./alphaliner.html" class="btn-link">Alphaliner 상세 대시보드 →</a>
-    </div>
-
-    <!-- ✈️ 2. TAC Index (항공 운임) 카드 -->
-    <div class="card">
-      <div>
-        <div class="card-header">
-          <h2 class="card-title">TAC Air Freight Index</h2>
-          <span class="badge badge-air">Air Cargo</span>
-        </div>
-        <div class="metric-body">
-          <div class="metric-label">Overall Rate Index</div>
-          <div class="metric-val">-</div>
-          <div class="metric-sub">Weekly Change: <b>-%</b> (-)</div>
-        </div>
-      </div>
-      <a href="./TAC_Index.html" class="btn-link">TAC Index 상세 대시보드 →</a>
-    </div>
-
-  </div>
-
+<body data-alpha-accent="" data-alpha-theme="briefing">
+<div class="doc">
+<header class="doc-header">
+<h1>Market Intelligence</h1>
+<div class="doc-date">2026-10-16</div>
+</header>
+<div class="doc-body"><nav class="doc-toc"><div class="toc-title">목차</div><ol><li><a href="#sec-2">02 Sea (해상)</a></li><li><a href="#sec-3">03 Air (항공)</a></li><li><a href="#sec-4">04 Macro Economies (거시 경제)</a></li></ol></nav>
+<h2 id="sec-2"><span class="num">02</span> Sea (해상)</h2>
+<div class="grid2">
+<div class="card">
+<h4>Shipping Index</h4>
+<p>SCFI와 BDI 지수</p>
+<a href="./Shipping%20Index/index.html" rel="noopener noreferrer">상세 보기 →</a>
+</div>
+<div class="card">
+<h4>Alphaliner</h4>
+<p>글로벌 컨테이너 선사 순위 및 선복량 데이터</p>
+<a href="./Alphaliner/index.html" rel="noopener noreferrer">상세 보기 →</a>
+</div>
+<div class="card">
+<h4>Forwarder</h4>
+<p>글로벌 포워더 순위</p>
+<a href="./Forwarder/index.html" rel="noopener noreferrer">상세 보기 →</a>
+</div>
+<div class="card">
+<h4>Bunker Price</h4>
+<p>에너지 가격 추이</p>
+<a href="./BunkerPrice/index.html" rel="noopener noreferrer">상세 보기 →</a>
+</div>
+</div>
+<h2 id="sec-3"><span class="num">03</span> Air (항공)</h2>
+<div class="grid2">
+<div class="card">
+<h4>TAC Index</h4>
+<p>항공 운임 지표</p>
+<a href="./TAC%20Index/index.html" rel="noopener noreferrer">상세 보기 →</a>
+</div>
+</div>
+<h2 id="sec-4"><span class="num">04</span> Macro Economies (거시 경제)</h2>
+<div class="grid2">
+<div class="card">
+<h4>GDP &amp; Inflation</h4>
+<p>글로벌 경제 성장률 및 인플레이션 지표</p>
+<a href="./GDP&amp;Inflation/index.html" rel="noopener noreferrer">상세 보기 →</a>
+</div>
+</div>
+<div class="takeaway">
+<span class="tag">TAKEAWAY</span>
+<p>특정 지표의 데이터가 최신이 아니라면, GitHub Repository의 Actions 탭에서 수동 업데이트를 진행할 수 있습니다.</p>
+</div>
+</div>
+</div>
 </body>
 </html>
