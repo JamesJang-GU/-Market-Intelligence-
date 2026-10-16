@@ -827,4 +827,4 @@ if __name__ == "__main__":
     port = find_available_port(host)
     print(f"Running local server at http://{host}:{port}")
     threading.Thread(target=wait_and_open_browser, args=(f"http://{host}:{port}", port), daemon=True).start()
-    app.run(host=host, port=port, debug=False, u
+    app.run(host=host, port=port, debug=False, use_reloader=False)
