@@ -25,7 +25,6 @@ CACHE_MINUTES = 30
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, 'alphaliner_history.db')
 
-
 def get_cache(key):
     item = MEM_CACHE.get(key)
     if not item:
@@ -36,28 +35,23 @@ def get_cache(key):
         return None
     return value
 
-
 def set_cache(key, value, minutes=CACHE_MINUTES):
     MEM_CACHE[key] = (datetime.datetime.now() + datetime.timedelta(minutes=minutes), value)
-
 
 def fmt_million(x):
     if pd.isna(x):
         return ''
     return f'{x/1_000_000:.1f}M'
 
-
 def fmt_num(x):
     if pd.isna(x):
         return ''
     return f'{int(round(float(x))):,}'
 
-
 def fmt_pct(x):
     if pd.isna(x):
         return ''
     return f'{float(x):.1f}%'
-
 
 def fmt_delta(x, pct=False):
     if pd.isna(x):
@@ -67,7 +61,6 @@ def fmt_delta(x, pct=False):
     if pct:
         return f'{sign}{x:.1f}%p'
     return f'{sign}{int(round(x)):,}'
-
 
 def delta_span(value, pct=False, rank_mode=False):
     if pd.isna(value):
@@ -83,7 +76,6 @@ def delta_span(value, pct=False, rank_mode=False):
     arrow = '▲ ' if n > 0 else ('▼ ' if n < 0 else '')
     return f'<span class="{cls}">{arrow}{fmt_delta(n, pct=pct)}</span>'
 
-
 def safe_num(x):
     try:
         if x is None or x == '':
@@ -91,7 +83,6 @@ def safe_num(x):
         return float(str(x).replace(',', ''))
     except Exception:
         return 0.0
-
 
 def get_db_conn():
     conn = sqlite3.connect(DB_FILE)
@@ -101,14 +92,12 @@ def get_db_conn():
     conn.commit()
     return conn
 
-
 def make_snapshot_hash(bundle):
     df = bundle['df'].copy()
     key_cols = [c for c in ['Rank', 'Operator', 'Total_TEU', 'Market_Share', 'Total_Ships', 'Owned_TEU', 'Owned_Ships', 'Chartered_TEU', 'Chartered_Ships', 'Chartered_Percent', 'Orderbook_TEU', 'Orderbook_Ships', 'Orderbook_Percent'] if c in df.columns]
     payload = df[key_cols].fillna('').astype(str).to_csv(index=False)
     payload += str(bundle.get('summary', {})) + str(bundle.get('regional', {}))
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
-
 
 def save_snapshot(bundle):
     try:
@@ -124,7 +113,7 @@ def save_snapshot(bundle):
 
         snapshot_hash = make_snapshot_hash(bundle)
         cur = conn.cursor()
-        
+
         cur.execute('SELECT snapshot_id FROM snapshot_master WHERE snapshot_hash = ? AND total_teu IS NOT NULL AND total_teu != "None"', (snapshot_hash,))
         row = cur.fetchone()
         if row:
@@ -175,7 +164,6 @@ def save_snapshot(bundle):
         print(f"[Error] Failed to save snapshot: {e}")
         return None
 
-
 def log_access(snapshot_id, refresh_flag, client_ip='', user_agent=''):
     try:
         conn = get_db_conn()
@@ -194,7 +182,6 @@ def log_access(snapshot_id, refresh_flag, client_ip='', user_agent=''):
     except Exception:
         pass
 
-
 def load_snapshot_detail(snapshot_id):
     if not snapshot_id:
         return pd.DataFrame()
@@ -203,7 +190,6 @@ def load_snapshot_detail(snapshot_id):
     df = pd.read_sql_query(q, conn, params=(snapshot_id,))
     conn.close()
     return df
-
 
 def get_snapshot_meta(snapshot_id):
     if not snapshot_id:
@@ -215,7 +201,6 @@ def get_snapshot_meta(snapshot_id):
     conn.close()
     return {'captured_at': row[0], 'active_ships': row[1], 'total_teu': row[2]} if row else None
 
-
 def get_previous_snapshot_id(current_snapshot_id):
     if not current_snapshot_id:
         return None
@@ -224,22 +209,20 @@ def get_previous_snapshot_id(current_snapshot_id):
         return None
     conn = get_db_conn()
     cur = conn.cursor()
-    # 최소 50개 이상의 선사 세부 데이터가 존재하는 정상 이전 스냅샷만 필터링
     cur.execute('''
-        SELECT m.snapshot_id 
+        SELECT m.snapshot_id
         FROM snapshot_master m
-        WHERE m.captured_at < ? 
-          AND m.total_teu IS NOT NULL 
-          AND m.total_teu != '' 
+        WHERE m.captured_at < ?
+          AND m.total_teu IS NOT NULL
+          AND m.total_teu != ''
           AND m.total_teu != 'None'
           AND (SELECT COUNT(*) FROM snapshot_detail d WHERE d.snapshot_id = m.snapshot_id) >= 50
-        ORDER BY m.captured_at DESC, m.snapshot_id DESC 
+        ORDER BY m.captured_at DESC, m.snapshot_id DESC
         LIMIT 1
     ''', (meta['captured_at'],))
     row = cur.fetchone()
     conn.close()
     return row[0] if row else None
-
 
 def build_snapshot_delta(current_df, previous_df):
     if current_df is None or current_df.empty or previous_df is None or previous_df.empty:
@@ -259,7 +242,6 @@ def build_snapshot_delta(current_df, previous_df):
     out.columns = ['Rank', 'Operator', 'Current_TEU', 'Previous_TEU', 'Delta_TEU', 'Current_Market_Share', 'Previous_Market_Share', 'Delta_Market_Share', 'Current_Ships', 'Previous_Ships', 'Delta_Ships', 'Rank_Change']
     return out.sort_values('Rank').reset_index(drop=True)
 
-
 def get_snapshot_id_by_mode(current_snapshot_id, compare_mode='previous', custom_date=None):
     if compare_mode == 'previous':
         return get_previous_snapshot_id(current_snapshot_id)
@@ -267,20 +249,20 @@ def get_snapshot_id_by_mode(current_snapshot_id, compare_mode='previous', custom
     cur = conn.cursor()
     current_meta = get_snapshot_meta(current_snapshot_id)
     current_captured = current_meta['captured_at'] if current_meta else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
     valid_condition = "AND total_teu IS NOT NULL AND total_teu != '' AND total_teu != 'None' AND (SELECT COUNT(*) FROM snapshot_detail d WHERE d.snapshot_id = snapshot_master.snapshot_id) >= 50"
-    
+
     if compare_mode == '1m':
         target = (datetime.datetime.strptime(current_captured, '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
         cur.execute(f'''
-            SELECT snapshot_id FROM snapshot_master 
+            SELECT snapshot_id FROM snapshot_master
             WHERE captured_at <= ? {valid_condition}
             ORDER BY captured_at DESC LIMIT 1
         ''', (target,))
     elif compare_mode == '3m':
         target = (datetime.datetime.strptime(current_captured, '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
         cur.execute(f'''
-            SELECT snapshot_id FROM snapshot_master 
+            SELECT snapshot_id FROM snapshot_master
             WHERE captured_at <= ? {valid_condition}
             ORDER BY captured_at DESC LIMIT 1
         ''', (target,))
@@ -288,7 +270,7 @@ def get_snapshot_id_by_mode(current_snapshot_id, compare_mode='previous', custom
         try:
             target = datetime.datetime.strptime(custom_date, '%Y-%m-%d').strftime('%Y-%m-%d 23:59:59')
             cur.execute(f'''
-                SELECT snapshot_id FROM snapshot_master 
+                SELECT snapshot_id FROM snapshot_master
                 WHERE captured_at <= ? {valid_condition}
                 ORDER BY captured_at DESC LIMIT 1
             ''', (target,))
@@ -298,11 +280,10 @@ def get_snapshot_id_by_mode(current_snapshot_id, compare_mode='previous', custom
     else:
         conn.close()
         return get_previous_snapshot_id(current_snapshot_id)
-        
+
     row = cur.fetchone()
     conn.close()
     return row[0] if row else get_previous_snapshot_id(current_snapshot_id)
-
 
 def fetch_bundle(force=False):
     cache_key = 'alphaliner_simple_bundle'
@@ -322,12 +303,12 @@ def fetch_bundle(force=False):
     try:
         driver.get(ALPHALINER_URL)
         time.sleep(10)
-        
+
         payload = driver.execute_script(r"""
             var out = {summary:{}, regional:{}, rows:[]};
             try {
                 var txt = document.body.innerText || '';
-                
+
                 var activeMatch = txt.match(/([0-9,]+)\s+active\s+ships/i);
                 if (activeMatch) {
                     out.summary.totalActiveShips = activeMatch[1];
@@ -355,11 +336,11 @@ def fetch_bundle(force=False):
 
             try {
                 var target = null;
-                Ext.StoreManager.items.forEach(function(s){ 
-                    try { if (!target && s.storeId === 'Top100description') target = s; } catch(e) {} 
+                Ext.StoreManager.items.forEach(function(s){
+                    try { if (!target && s.storeId === 'Top100description') target = s; } catch(e) {}
                 });
-                if (target) { 
-                    for (var i=0; i<target.getCount(); i++) out.rows.push(target.getAt(i).data); 
+                if (target) {
+                    for (var i=0; i<target.getCount(); i++) out.rows.push(target.getAt(i).data);
                 }
             } catch(e) {}
             return out;
@@ -404,7 +385,6 @@ def fetch_bundle(force=False):
     set_cache(cache_key, bundle)
     return bundle
 
-
 def make_download_response(df, filename, kind='csv'):
     if kind == 'excel':
         output = BytesIO()
@@ -421,7 +401,6 @@ def make_download_response(df, filename, kind='csv'):
         mimetype='text/csv; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename={filename}'}
     )
-
 
 def make_compare_download_response(current_df, previous_df, delta_df, filename, kind='csv'):
     if kind == 'excel':
@@ -442,183 +421,412 @@ def make_compare_download_response(current_df, previous_df, delta_df, filename, 
         headers={'Content-Disposition': f'attachment; filename={filename}'}
     )
 
-
 def fig_html(fig, first=False):
     return fig.to_html(full_html=False, include_plotlyjs='cdn' if first else False)
 
-
 HTML = """
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Alphaliner Top 100 Carriers</title>
+<title>Alphaliner Top 100 Carriers Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #f0f3f7;
+  --bg: #f8fafc;
   --surface: #ffffff;
-  --surface-2: #f8fafc;
+  --surface-2: #f1f5f9;
   --border: #e2e8f0;
-  --text: #2c3e50;
-  --muted: #7f8c8d;
-  --primary: #3498db;
-  --success: #27ae60;
-  --shadow: 0 2px 12px rgba(0,0,0,0.06);
+  --border-dark: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --accent-navy: #1e293b;
+  --pos: #dc2626;
+  --neg: #2563eb;
+  --zero: #64748b;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+  --shadow: 0 4px 12px -2px rgba(0,0,0,0.06), 0 2px 6px -1px rgba(0,0,0,0.04);
   --radius: 12px;
 }
-* { box-sizing: border-box; }
-body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1380px; margin: 24px auto; padding: 20px; background: var(--bg); color: var(--text); line-height: 1.45; }
-.header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid var(--primary); padding-bottom:16px; margin-bottom:20px; gap:12px; flex-wrap:wrap; }
-h1 { margin:0; color:var(--text); font-size:28px; }
-.meta { color: var(--muted); font-size: 12px; margin-bottom: 20px; line-height: 1.7; }
-.meta strong { color: #34495e; }
-.card { background:var(--surface); padding:18px; border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:20px; }
-.card:last-of-type { margin-bottom: 16px; }
-.section-label, .panel-title { margin:0 0 12px 0; font-weight:700; color:#34495e; }
-.section-label { font-size:14px; }
-.panel-title { font-size:20px; line-height:1.25; }
-.metrics-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:14px; }
-.insight-card { background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:16px; }
-.insight-label { font-size:12px; font-weight:700; letter-spacing:.4px; color:#64748b; text-transform:uppercase; margin-bottom:8px; }
-.insight-value { font-size:28px; font-weight:700; color:#0f172a; margin-bottom:6px; }
-.insight-desc { font-size:13px; color:#475569; line-height:1.45; }
-.chart-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
-.chart-toolbar + .table-wrap, .chart-toolbar + .detail-wrap { margin-top: 8px; }
-.toolbar-title { font-size:14px; font-weight:700; color:#34495e; }
-.toolbar-subtitle { font-size:12px; color:var(--muted); margin-top:4px; }
-.download-group { display:flex; gap:8px; flex-wrap:wrap; }
-.download-btn { padding:8px 14px; min-height:36px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--primary); background:white; color:var(--primary); border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; text-decoration:none; }
-.download-btn:hover { background:var(--primary); color:white; }
-.download-btn.xlsx { border-color:var(--success); color:var(--success); }
-.download-btn.xlsx:hover { background:var(--success); color:white; }
-.quick-facts { background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:16px; margin-top:18px; font-size:13px; color:#475569; line-height:1.7; }
-.quick-facts b { color:#0f172a; }
-.delta-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:14px; }
-.delta-card { background:#fbfdff; border:1px solid var(--border); border-radius:10px; padding:16px; }
-.delta-main { font-size:22px; font-weight:700; margin-top:4px; }
-.delta-pos { color:#dc2626; font-weight:700; }
-.delta-neg { color:#2563eb; font-weight:700; }
-.delta-zero { color:#64748b; font-weight:600; }
-.table-wrap, .detail-wrap { width:100%; overflow-x:visible; margin-top: 2px; }
-table { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
-th, td { border:1px solid #e5e7eb; padding:6px 8px; text-align:right; vertical-align:middle; white-space:normal; word-break:break-word; overflow-wrap:anywhere; }
-th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
-.table-wrap th, .detail-wrap th { vertical-align: middle; }
-th { background:#f8fafc; color:#334155; font-weight:700; }
-.detail-wrap table, .table-wrap table { min-width:100%; width:100%; }
-.detail-wrap th, .detail-wrap td, .table-wrap th, .table-wrap td { font-size:10px; line-height:1.15; padding:4px 5px; }
-.detail-wrap th:first-child, .detail-wrap td:first-child { width:4.5%; }
-.detail-wrap th:nth-child(2), .detail-wrap td:nth-child(2) { width:12%; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
-.detail-wrap th:nth-child(n+3), .detail-wrap td:nth-child(n+3) { width:7.6%; white-space:nowrap; word-break:normal; overflow-wrap:normal; }
-.detail-super th { background:#eaf2fb; color:#12355b; font-weight:800; text-align:center; }
-.detail-sub th { background:#f8fafc; color:#334155; font-weight:700; text-align:center; white-space:nowrap; }
-.footer { color:var(--muted); font-size:12px; text-align:center; margin-top:12px; padding-bottom: 4px; }
-@media (max-width: 768px) { body { margin:0; padding:16px; } h1 { font-size:24px; } .card { padding:16px; } }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  padding: 24px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+.top-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+.back-link:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.title-group h1 {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.5px;
+}
+.meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.meta strong { color: var(--accent-navy); }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.toolbar-wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.filter-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.select-input, .date-input {
+  padding: 7px 12px;
+  border: 1px solid var(--border-dark);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+.btn-apply {
+  padding: 7px 14px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-apply:hover { background: var(--primary-hover); }
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.kpi-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.kpi-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 4px;
+}
+.kpi-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.delta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.delta-card {
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.delta-main {
+  font-size: 20px;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  margin: 4px 0;
+}
+.delta-pos { color: var(--pos); font-weight: 700; }
+.delta-neg { color: var(--neg); font-weight: 700; }
+.delta-zero { color: var(--zero); font-weight: 600; }
+.quick-facts {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-size: 13px;
+  color: #1e3a8a;
+  line-height: 1.6;
+  margin-top: 14px;
+}
+.quick-facts b { color: #172554; }
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: right;
+}
+th, td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+th {
+  background: var(--surface-2);
+  color: #334155;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+th:first-child, td:first-child,
+th:nth-child(2), td:nth-child(2) {
+  text-align: left;
+}
+tbody tr:hover { background: #f8fafc; }
+.detail-super th {
+  background: #e2e8f0;
+  color: #0f172a;
+  font-weight: 800;
+  text-align: center;
+  border-right: 1px solid #cbd5e1;
+}
+.detail-sub th {
+  background: #f1f5f9;
+  color: #475569;
+  text-align: center;
+}
+.footer {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 32px;
+  padding-bottom: 12px;
+}
+@media (max-width: 768px) {
+  body { padding: 14px; }
+  .header { flex-direction: column; align-items: flex-start; }
+  .kpi-grid, .delta-grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
+
+  <div class="top-nav">
+    <a href="../index.html" class="back-link">
+      <span>←</span> Back to Dashboard
+    </a>
+    <span class="meta">Market Intelligence / <strong>02 Sea</strong></span>
+  </div>
+
   <div class="header">
-    <div>
-      <h1>Alphaliner Top 100 Carriers Dashboard</h1>
+    <div class="title-group">
+      <h1>Alphaliner Top 100 Global Carriers</h1>
+      <div class="meta">
+        <strong>Source:</strong> Alphaliner Public Top 100 &nbsp;|&nbsp;
+        <strong>Captured:</strong> {{ fetched_at }}
+        {% if previous_snapshot_at %}
+        &nbsp;|&nbsp; <strong>Base Snapshot:</strong> {{ previous_snapshot_at }}
+        {% endif %}
+      </div>
     </div>
   </div>
 
-  <div class="meta">
-    <strong>Source:</strong> Alphaliner Public Top 100 &nbsp;|&nbsp;
-    <strong>Fetched at:</strong> {{ fetched_at }}
-    {% if previous_snapshot_at %}
-    &nbsp;|&nbsp; <strong>Compared with previous snapshot:</strong> {{ previous_snapshot_at }}
-    {% endif %}
-  </div>
-
   <div class="card">
-    <div class="chart-toolbar">
+    <div class="toolbar-wrap">
       <div>
-        <div class="toolbar-title">Comparison Basis</div>
-        <div class="toolbar-subtitle">Choose how the current snapshot should be compared with historical data</div>
+        <div style="font-weight: 700; font-size: 14px;">시계열 비교 기준 설정</div>
+        <div style="font-size: 12px; color: var(--text-muted);">현재 스냅샷과 비교할 과거 시점을 선택합니다.</div>
       </div>
-      <form method="get" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <select name="compare_mode" style="padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; min-height:36px;">
-          <option value="previous" {% if compare_mode == 'previous' %}selected{% endif %}>Previous snapshot</option>
-          <option value="1m" {% if compare_mode == '1m' %}selected{% endif %}>1 month ago</option>
-          <option value="3m" {% if compare_mode == '3m' %}selected{% endif %}>3 months ago</option>
-          <option value="custom" {% if compare_mode == 'custom' %}selected{% endif %}>Custom date</option>
+      <form method="get" class="filter-form">
+        <select name="compare_mode" class="select-input">
+          <option value="previous" {% if compare_mode == 'previous' %}selected{% endif %}>직전 스냅샷 (Previous)</option>
+          <option value="1m" {% if compare_mode == '1m' %}selected{% endif %}>1개월 전 (1 Month ago)</option>
+          <option value="3m" {% if compare_mode == '3m' %}selected{% endif %}>3개월 전 (3 Months ago)</option>
+          <option value="custom" {% if compare_mode == 'custom' %}selected{% endif %}>직접 지정 (Custom)</option>
         </select>
-        <input type="date" name="custom_date" value="{{ custom_date or '' }}" style="padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; min-height:36px;">
-        <button type="submit" class="download-btn">Apply</button>
+        <input type="date" name="custom_date" value="{{ custom_date or '' }}" class="date-input">
+        <button type="submit" class="btn-apply">적용</button>
       </form>
     </div>
-  <div class="insight-desc">Current comparison basis: <b>{{ compare_label }}</b></div>
-  </div>
-
-  <div class="card">
-    <label class="section-label">Current Snapshot Highlights</label>
-    <div class="metrics-grid">
-      <div class="insight-card"><div class="insight-label">Active Ships</div><div class="insight-value">{{ active_ships }}</div><div class="insight-desc">Number of active ships in the currently fetched public snapshot.</div></div>
-      <div class="insight-card"><div class="insight-label">Total TEU</div><div class="insight-value">{{ total_teu_global }}</div><div class="insight-desc">Aggregate fleet capacity shown by the source snapshot.</div></div>
-      <div class="insight-card"><div class="insight-label">Trans-Atlantic</div><div class="insight-value">{{ trans_atlantic }}</div><div class="insight-desc">Weekly regional capacity shown in the public source.</div></div>
-      <div class="insight-card"><div class="insight-label">Trans-Pacific</div><div class="insight-value">{{ trans_pacific }}</div><div class="insight-desc">Weekly regional capacity shown in the public source.</div></div>
-      <div class="insight-card"><div class="insight-label">FEast-Europe</div><div class="insight-value">{{ feast_europe }}</div><div class="insight-desc">Weekly regional capacity shown in the public source.</div></div>
+    <div style="margin-top: 10px; font-size: 12px; color: var(--text-muted);">
+      현재 비교 기준: <strong>{{ compare_label }}</strong>
     </div>
   </div>
 
   <div class="card">
-    <h2 class="panel-title">Snapshot Change Summary</h2>
-    {% if has_previous %}
-    <div class="delta-grid">
-      <div class="delta-card"><div class="insight-label">Total TEU Change</div><div class="delta-main {{ total_teu_delta_class }}">{{ total_teu_delta }}</div><div class="insight-desc">Current total fleet capacity vs previous snapshot.</div></div>
-      <div class="delta-card"><div class="insight-label">Active Ships Change</div><div class="delta-main {{ active_ships_delta_class }}">{{ active_ships_delta }}</div><div class="insight-desc">Active vessel count vs previous snapshot.</div></div>
-      <div class="delta-card"><div class="insight-label">Biggest TEU Increase</div><div class="delta-main delta-pos">{{ biggest_gain_name }}</div><div class="insight-desc">{{ biggest_gain_value|safe }}</div></div>
-      <div class="delta-card"><div class="insight-label">Biggest TEU Decrease</div><div class="delta-main delta-neg">{{ biggest_loss_name }}</div><div class="insight-desc">{{ biggest_loss_value|safe }}</div></div>
-    </div>
-    {% else %}
-    <div class="insight-desc">No previous snapshot is available yet for comparison.</div>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <div class="chart-toolbar">
-      <div>
-        <div class="toolbar-title">Top 10 carriers by total capacity</div>
-        <div class="toolbar-subtitle">Publicly available Alphaliner Top 100 snapshot</div>
+    <div class="card-title">글로벌 선대 및 주요 항로 공급량 현황</div>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Ships</div>
+        <div class="kpi-value">{{ active_ships }}</div>
+        <div class="kpi-desc">운항 중인 총 컨테이너 선박 수</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total TEU</div>
+        <div class="kpi-value">{{ total_teu_global }}</div>
+        <div class="kpi-desc">글로벌 총 공급 선복량</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Trans-Atlantic</div>
+        <div class="kpi-value">{{ trans_atlantic }}</div>
+        <div class="kpi-desc">대서양 항로 주간 선복량</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Trans-Pacific</div>
+        <div class="kpi-value">{{ trans_pacific }}</div>
+        <div class="kpi-desc">태평양(미주) 항로 주간 선복량</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">FEast-Europe</div>
+        <div class="kpi-value">{{ feast_europe }}</div>
+        <div class="kpi-desc">극동-유럽 항로 주간 선복량</div>
       </div>
     </div>
-    {{ chart1_en|safe }}
+  </div>
+
+  <div class="card">
+    <div class="card-title">스냅샷 변동치 분석 (Delta Summary)</div>
+    {% if has_previous %}
+    <div class="delta-grid">
+      <div class="delta-card">
+        <div class="kpi-label">Total TEU Change</div>
+        <div class="delta-main {{ total_teu_delta_class }}">{{ total_teu_delta }}</div>
+        <div class="kpi-desc">총 선복량 증감</div>
+      </div>
+      <div class="delta-card">
+        <div class="kpi-label">Active Ships Change</div>
+        <div class="delta-main {{ active_ships_delta_class }}">{{ active_ships_delta }}</div>
+        <div class="kpi-desc">운항 선박 수 증감</div>
+      </div>
+      <div class="delta-card">
+        <div class="kpi-label">최대 선복 증가 선사</div>
+        <div class="delta-main delta-pos">{{ biggest_gain_name }}</div>
+        <div class="kpi-desc">{{ biggest_gain_value|safe }}</div>
+      </div>
+      <div class="delta-card">
+        <div class="kpi-label">최대 선복 감소 선사</div>
+        <div class="delta-main delta-neg">{{ biggest_loss_name }}</div>
+        <div class="kpi-desc">{{ biggest_loss_value|safe }}</div>
+      </div>
+    </div>
+    {% else %}
+    <div style="font-size: 13px; color: var(--text-muted);">비교 가능한 과거 스냅샷 데이터가 없습니다.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">상위 10대 선사 공급 선복량 (Top 10 Capacity)</div>
+    <div style="margin-bottom: 8px;">
+      {{ chart1_en|safe }}
+    </div>
     <div class="quick-facts">
-      Top 3 share: <b>{{ top3_share }}</b>
-      &nbsp;|&nbsp;
-      Top 5 share: <b>{{ top5_share }}</b><br>
-      Operators to reach 50% cumulative share: <b>{{ top50_count }}</b>
-      &nbsp;/&nbsp; <b>{{ top50_share }}</b><br>
-      Operators inside the 50% cumulative threshold: {{ top50_names }}
+      Top 3 선사 점유율: <b>{{ top3_share }}</b> &nbsp;|&nbsp; Top 5 선사 점유율: <b>{{ top5_share }}</b><br>
+      누적 점유율 50% 도달 선사 수: <b>{{ top50_count }}개사 (합산 점유율 {{ top50_share }})</b><br>
+      상위 50% 과점 선사군: <b>{{ top50_names }}</b>
     </div>
   </div>
 
   <div class="card">
-    <h2 class="panel-title">Summary Table</h2>
-    <div class="table-wrap"><div>{{ share_table_en|safe }}</div></div>
+    <div class="card-title">상위 선사 점유율 요약</div>
+    <div class="table-container">
+      {{ share_table_en|safe }}
+    </div>
   </div>
 
   <div class="card">
-    <h2 class="panel-title">Detailed Fleet Structure</h2>
-    <div class="detail-wrap"><div>{{ detail_table_en|safe }}</div></div>
+    <div class="card-title">선대 세부 구조 (Owned vs Chartered vs Orderbook)</div>
+    <div class="table-container">
+      {{ detail_table_en|safe }}
+    </div>
   </div>
 
   <div class="card">
-    <h2 class="panel-title">Current vs Previous Snapshot Delta</h2>
+    <div class="card-title">선사별 순위 및 선복량 변동 상세 (Current vs Previous)</div>
     {% if has_previous %}
-    <div class="table-wrap"><div>{{ delta_table_html|safe }}</div></div>
+    <div class="table-container">
+      {{ delta_table_html|safe }}
+    </div>
     {% else %}
-    <div class="insight-desc">No previous snapshot is available yet for comparison.</div>
+    <div style="font-size: 13px; color: var(--text-muted);">비교 데이터가 없습니다.</div>
     {% endif %}
   </div>
 
-  <div class="footer">Current market overview based on publicly available Alphaliner data.</div>
+  <div class="footer">
+    Market Intelligence Dashboard &copy; 2026. Data automatically captured and generated via Alphaliner.
+  </div>
+
 </body>
 </html>
 """
-
 
 @app.route('/download')
 def download():
@@ -647,7 +855,6 @@ def download():
     if fmt == 'excel':
         return make_download_response(df, f'Alphaliner_Top100_{today}.xlsx', 'excel')
     return make_download_response(df, f'Alphaliner_Top100_{today}.csv', 'csv')
-
 
 @app.route('/')
 def index():
@@ -679,17 +886,17 @@ def index():
         x=top10['Operator'],
         y=top10['Total_TEU'],
         name='Total TEU',
-        marker_color='#1d4ed8',
+        marker_color='#2563eb',
         text=[fmt_million(x) for x in top10['Total_TEU']],
         textposition='outside',
         cliponaxis=False,
-        textfont=dict(size=11)
+        textfont=dict(size=11, family='Pretendard, sans-serif')
     ))
     fig1.update_layout(
         template='plotly_white',
-        height=520,
+        height=500,
         margin=dict(l=20, r=20, t=30, b=60),
-        yaxis=dict(title='Total TEU'),
+        yaxis=dict(title='Total TEU', gridcolor='#f1f5f9'),
         xaxis=dict(categoryorder='array', categoryarray=top10['Operator'].tolist(), tickangle=-30),
         showlegend=False,
         hoverlabel=dict(namelength=-1)
@@ -808,10 +1015,8 @@ def index():
         delta_table_html=delta_table_html
     )
 
-
 def open_browser():
     webbrowser.open_new("http://127.0.0.1:8081")
-
 
 def run_crawler_only():
     print("[System] Running in CLI mode: Fetching latest Alphaliner data...")
@@ -822,13 +1027,13 @@ def run_crawler_only():
     else:
         print("[System] Snapshot already exists or failed to save.")
 
-    print("[System] Generating static alphaliner.html for GitHub Pages...")
+    print("[System] Generating static index.html for GitHub Pages...")
     with app.test_request_context('/'):
         html_content = index()
-        with open(os.path.join(BASE_DIR, 'alphaliner.html'), 'w', encoding='utf-8') as f:
+        output_path = os.path.join(BASE_DIR, 'index.html')
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
-    print("[System] Static index.html generated successfully!")
-
+    print(f"[System] Static index.html generated successfully at: {output_path}")
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--cron':
