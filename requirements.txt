@@ -1,6 +1,0 @@
-pandas
-selenium
-openpyxl
-webdriver-manager
-flask
-plotly
