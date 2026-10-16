@@ -7,3 +7,4 @@ openpyxl
 lxml
 Flask
 plotly
+matplotlib
