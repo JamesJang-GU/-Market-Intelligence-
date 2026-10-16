@@ -817,14 +817,26 @@ def wait_and_open_browser(url, port):
     webbrowser.open(url)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--cron", action="store_true")
-    args = parser.parse_args()
-    if args.cron:
-        run_cron_job()
+    parser = argparse.ArgumentParser(description="Bunker Price Dashboard")
+    parser.add_argument("--crawl-only", action="store_true", help="크롤링 및 DB 저장/빌드만 수행하고 종료")
+    parser.add_argument("--port", type=int, default=5003, help="Flask 포트")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Flask 호스트")
+    args, unknown = parser.parse_known_args()
+
+    # 1) 먼저 크롤링 및 DB 업데이트 실행
+    try:
+        print("[Bunker] Initializing data crawl...")
+        refresh_product_data()
+        refresh_forecast_data()
+        print("[Bunker] Crawl and DB update completed.")
+    except Exception as e:
+        print(f"[Bunker] Crawl error: {e}")
+
+    # 2) GitHub Actions 환경이거나 --crawl-only 옵션인 경우 Flask 서버를 띄우지 않고 바로 정상 종료
+    import os
+    if os.environ.get("GITHUB_ACTIONS") == "true" or args.crawl_only:
+        print("[Bunker] GitHub Actions detected: exiting after crawl completion.")
         sys.exit(0)
-    host = "127.0.0.1"
-    port = find_available_port(host)
-    print(f"Running local server at http://{host}:{port}")
-    threading.Thread(target=wait_and_open_browser, args=(f"http://{host}:{port}", port), daemon=True).start()
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+
+    # 3) 로컬 PC에서 직접 실행했을 때만 대시보드 웹 서버 실행
+    app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
