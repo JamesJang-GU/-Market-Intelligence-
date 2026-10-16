@@ -2,36 +2,66 @@ name: Weekly Market Intelligence Automation
 
 on:
   schedule:
-    # UTC 기준 일요일 15:00 (한국 시간 월요일 00:00)
-    - cron: '0 15 * * 0'
-  workflow_dispatch: # 수동 실행 가능하도록 설정
+    # UTC 기준 일요일 15:00 = 한국 시간 월요일 00:00
+    - cron: "0 15 * * 0"
+
+  # GitHub Actions 화면에서 수동 실행 가능
+  workflow_dispatch:
+
+# github-actions[bot]이 크롤링 결과물(DB/JSON/HTML 등)을
+# 현재 리포지토리에 commit/push할 수 있도록 권한 부여
+permissions:
+  contents: write
 
 jobs:
   automate:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
+          # 커밋/푸시를 위해 기본 토큰 자격증명을 유지
+          persist-credentials: true
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Google Chrome
+        uses: browser-actions/setup-chrome@v1
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
 
       - name: Run All Crawlers
-        run: python run_all.py
-
-      - name: Commit & Push Changes
+        env:
+          # KSG 로그인 정보가 필요한 크롤러에서 사용
+          KSG_ID: ${{ secrets.KSG_ID }}
+          KSG_PW: ${{ secrets.KSG_PW }}
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          python run_all.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 크롤링 결과로 변경된 DB, JSON, HTML 등을 스테이징
           git add .
-          # 변경사항이 있을 때만 커밋
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto: Update data and dashboard [$(date +'%Y-%m-%d')]" && git push)
+
+          # 스테이징된 변경사항이 있을 때만 커밋 및 푸시
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Auto: Update data and dashboard [$(date +'%Y-%m-%d')]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
