@@ -1,67 +1,48 @@
-name: Weekly Market Intelligence Automation
+name: Update Market Intelligence Dashboard
 
 on:
+  workflow_dispatch:  # GitHub 화면에서 수동 실행 버튼 활성화
   schedule:
-    # UTC 기준 일요일 15:00 = 한국 시간 월요일 00:00
-    - cron: "0 15 * * 0"
+    - cron: "0 22 * * *"  # 매일 KST 00:00 실행 (UTC 기준)
 
-  # GitHub Actions 화면에서 수동 실행 가능
-  workflow_dispatch:
-
-# github-actions[bot]이 크롤링 결과물(DB/JSON/HTML 등)을
-# 현재 리포지토리에 commit/push할 수 있도록 권한 부여
 permissions:
   contents: write
 
 jobs:
-  automate:
+  crawl-and-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 커밋/푸시를 위해 기본 토큰 자격증명을 유지
-          persist-credentials: true
           fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
-      - name: Install Google Chrome
-        uses: browser-actions/setup-chrome@v1
-
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-
-      - name: Run All Crawlers
-        env:
-          # KSG 로그인 정보가 필요한 크롤러에서 사용
-          KSG_ID: ${{ secrets.KSG_ID }}
-          KSG_PW: ${{ secrets.KSG_PW }}
+      - name: Run crawler and generate dashboard
         run: |
           python run_all.py
 
-      - name: Commit and Push Changes
+      - name: Check generated files
+        run: |
+          test -f index.html
+          git status --short
+
+      - name: Commit and push updated data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 크롤링 결과로 변경된 DB, JSON, HTML 등을 스테이징
-          git add .
-
-          # 스테이징된 변경사항이 있을 때만 커밋 및 푸시
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Auto: Update data and dashboard [$(date +'%Y-%m-%d')]"
-            git push origin HEAD:${{ github.ref_name }}
-          fi
+          git add -A
+          git diff --cached --quiet || git commit -m "Auto: update data and dashboard [$(date -u +'%Y-%m-%d')]"
+          git push
