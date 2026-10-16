@@ -1,35 +1,39 @@
 # -*- coding: utf-8 -*-
-import sys
-import warnings
-import re
-import sqlite3
 import argparse
+import datetime as dt
+import os
+import re
 import socket
+import sqlite3
+import sys
 import threading
 import time
-import webbrowser
 import urllib.parse
-
-from pathlib import Path
+import warnings
+import webbrowser
 from datetime import datetime
+from io import StringIO
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-from flask import Flask, render_template_string, request, Response
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import Select, WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 import pandas as pd
 import plotly.graph_objects as go
+import requests
+from bs4 import BeautifulSoup
+from flask import Flask, Response, render_template_string, request
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import Select, WebDriverWait
 
 app = Flask(__name__)
 
-# =========================
+# =========================================================
 # 1. Configuration & Constants
-# =========================
+# =========================================================
 TAC_BLUE = "#3498db"
 TAC_BLUE_DARK = "#1f3447"
 TAC_GREEN = "#27ae60"
@@ -47,6 +51,12 @@ SINGAPORE_URL = "https://shipandbunker.com/prices/apac/sea/sg-sin-singapore#_VLS
 URLS = [ROTTERDAM_URL, FUJAIRAH_URL, SINGAPORE_URL]
 ALL_PORTS = ["Rotterdam", "Fujairah", "Singapore"]
 
+FORECAST_URLS = {
+    "Rotterdam": ROTTERDAM_URL,
+    "Fujairah": FUJAIRAH_URL,
+    "Singapore": SINGAPORE_URL,
+}
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILENAME = "energy_market_data.db"
 PRODUCT_TABLE = "product_vlsfo"
@@ -60,9 +70,9 @@ DATA_CACHE = {"df": None, "fetched_at": None}
 FORECAST_CACHE = {"df": None, "fetched_at": None, "message": ""}
 FORECAST_PRODUCT_COLUMNS = ["VLSFO", "MGO", "LSMGO", "HSFO"]
 
-# =========================
+# =========================================================
 # 2. SQLite DB Utilities
-# =========================
+# =========================================================
 def get_db_path():
     return BASE_DIR / DB_FILENAME
 
@@ -81,7 +91,10 @@ def get_db_conn():
 def db_table_exists(table_name):
     conn = get_db_conn()
     try:
-        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
         return cur.fetchone() is not None
     finally:
         conn.close()
@@ -105,7 +118,9 @@ def set_dataset_meta(dataset, fetched_at=None):
 def get_dataset_meta(dataset):
     conn = get_db_conn()
     try:
-        row = conn.execute("SELECT fetched_at FROM data_meta WHERE dataset=?", (dataset,)).fetchone()
+        row = conn.execute(
+            "SELECT fetched_at FROM data_meta WHERE dataset=?", (dataset,)
+        ).fetchone()
         return row[0] if row and row[0] else "-"
     finally:
         conn.close()
@@ -116,7 +131,9 @@ def save_dataframe_to_db(df, table_name, dataset_name):
     out = df.copy()
     for c in out.columns:
         if pd.api.types.is_datetime64_any_dtype(out[c]):
-            out[c] = pd.to_datetime(out[c], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+            out[c] = pd.to_datetime(out[c], errors="coerce").dt.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
     fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_conn()
     try:
@@ -136,9 +153,9 @@ def load_dataframe_from_db(table_name):
     finally:
         conn.close()
 
-# =========================
+# =========================================================
 # 3. Selenium Crawler Logic
-# =========================
+# =========================================================
 def make_driver(headless=True):
     options = Options()
     if headless:
@@ -208,34 +225,48 @@ def extract_vlsfo_full_data(driver):
 
 def clean_forecast_number(value):
     s = str(value).strip()
-    if not s or s.lower() == "nan" or s == "-": return None
+    if not s or s.lower() == "nan" or s == "-":
+        return None
     s = s.replace(",", "")
     s = re.sub(r"[^0-9.+-]", "", s)
-    if not s or s in ["+", "-", "."]: return None
-    try: return float(s)
-    except: return None
+    if not s or s in ["+", "-", "."]:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
 
 def forecast_period_to_date(period):
     s = str(period or "").strip()
     m = re.search(r"(20\d{2})\s*Q([1-4])", s, flags=re.I)
-    if not m: return pd.NaT
+    if not m:
+        return pd.NaT
     year = int(m.group(1))
     q = int(m.group(2))
     month_day = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}[q]
     return pd.Timestamp(year=year, month=month_day[0], day=month_day[1])
 
 def normalize_forecast_table(raw_df):
-    if raw_df is None or raw_df.empty: return pd.DataFrame()
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame()
     df = raw_df.copy()
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [" ".join([str(x) for x in c if str(x) != "nan"]).strip() for c in df.columns]
+        df.columns = [
+            " ".join([str(x) for x in c if str(x) != "nan"]).strip()
+            for c in df.columns
+        ]
     else:
         df.columns = [str(c).strip() for c in df.columns]
     df = df.dropna(how="all").dropna(axis=1, how="all")
-    if df.empty: return pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
     col_text = " ".join(map(str, df.columns)).upper()
-    first_row_text = " ".join(map(str, df.iloc[0].tolist())).upper() if len(df) else ""
-    if not any(c in col_text for c in FORECAST_PRODUCT_COLUMNS) and any(c in first_row_text for c in FORECAST_PRODUCT_COLUMNS):
+    first_row_text = (
+        " ".join(map(str, df.iloc[0].tolist())).upper() if len(df) else ""
+    )
+    if not any(c in col_text for c in FORECAST_PRODUCT_COLUMNS) and any(
+        c in first_row_text for c in FORECAST_PRODUCT_COLUMNS
+    ):
         df.columns = [str(x).strip() for x in df.iloc[0].tolist()]
         df = df.iloc[1:].reset_index(drop=True)
         df = df.dropna(how="all").dropna(axis=1, how="all")
@@ -255,34 +286,51 @@ def normalize_forecast_table(raw_df):
                 product_positions[prod] = idx
     if not product_positions:
         for col_idx in range(df.shape[1]):
-            sample_text = " ".join(df.iloc[:3, col_idx].astype(str).tolist()).upper()
+            sample_text = " ".join(
+                df.iloc[:3, col_idx].astype(str).tolist()
+            ).upper()
             for prod in FORECAST_PRODUCT_COLUMNS:
                 if prod in sample_text:
                     product_positions[prod] = col_idx
-    if not product_positions: return pd.DataFrame()
+    if not product_positions:
+        return pd.DataFrame()
     first_product_pos = min(product_positions.values())
     period_pos = max(0, first_product_pos - 1)
     for col_idx in range(df.shape[1]):
-        if col_idx in product_positions.values(): continue
+        if col_idx in product_positions.values():
+            continue
         sample = df.iloc[:, col_idx].astype(str)
-        if sample.str.contains(r"20\d{2}|\d{2}\s*Q[1-4]|Q[1-4]|Full Year", case=False, regex=True, na=False).any():
+        if sample.str.contains(
+            r"20\d{2}|\d{2}\s*Q[1-4]|Q[1-4]|Full Year",
+            case=False,
+            regex=True,
+            na=False,
+        ).any():
             period_pos = col_idx
             break
     out = pd.DataFrame()
     out["Period"] = df.iloc[:, period_pos].astype(str).str.strip()
     for prod in FORECAST_PRODUCT_COLUMNS:
         pos = product_positions.get(prod)
-        if pos is None or pos >= df.shape[1]: out[prod] = None
-        else: out[prod] = df.iloc[:, pos].apply(clean_forecast_number)
-    out = out[out["Period"].astype(str).str.contains(r"20\d{2}|Q[1-4]|Full Year", case=False, regex=True, na=False)]
+        if pos is None or pos >= df.shape[1]:
+            out[prod] = None
+        else:
+            out[prod] = df.iloc[:, pos].apply(clean_forecast_number)
+    out = out[
+        out["Period"]
+        .astype(str)
+        .str.contains(r"20\d{2}|Q[1-4]|Full Year", case=False, regex=True, na=False)
+    ]
     out = out.dropna(subset=FORECAST_PRODUCT_COLUMNS, how="all")
-    if out.empty: return pd.DataFrame()
+    if out.empty:
+        return pd.DataFrame()
     out["graph_date"] = out["Period"].apply(forecast_period_to_date)
     out["source_url"] = ""
-    return out[["Period"] + FORECAST_PRODUCT_COLUMNS + ["graph_date", "source_url"]].reset_index(drop=True)
+    return out[
+        ["Period"] + FORECAST_PRODUCT_COLUMNS + ["graph_date", "source_url"]
+    ].reset_index(drop=True)
 
 def parse_bunker_forecast_from_html(html, port_name):
-    from io import StringIO
     errors = []
     try:
         tables = pd.read_html(StringIO(html))
@@ -290,42 +338,66 @@ def parse_bunker_forecast_from_html(html, port_name):
         best_score = -1
         for table in tables:
             normalized = normalize_forecast_table(table)
-            if normalized.empty: continue
-            text = " ".join(map(str, table.columns)) + " " + " ".join(map(str, table.head(3).values.ravel()))
+            if normalized.empty:
+                continue
+            text = (
+                " ".join(map(str, table.columns))
+                + " "
+                + " ".join(map(str, table.head(3).values.ravel()))
+            )
             score = 0
             for key in FORECAST_PRODUCT_COLUMNS:
-                if key in text.upper(): score += 5
-            if normalized["Period"].astype(str).str.contains("Full Year", case=False, na=False).any(): score += 3
-            if normalized["graph_date"].notna().any(): score += 3
+                if key in text.upper():
+                    score += 5
+            if (
+                normalized["Period"]
+                .astype(str)
+                .str.contains("Full Year", case=False, na=False)
+                .any()
+            ):
+                score += 3
+            if normalized["graph_date"].notna().any():
+                score += 3
             if score > best_score:
                 best_score = score
                 best = normalized
         if not best.empty:
             best["port"] = port_name
             return best
-    except Exception as e: errors.append(f"pandas: {e}")
+    except Exception as e:
+        errors.append(f"pandas: {e}")
     try:
-        from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
-        heading_patterns = [rf"{re.escape(port_name)}\s+Bunker\s+Price\s+Forecast", r"Bunker\s+Price\s+Forecast"]
+        heading_patterns = [
+            rf"{re.escape(port_name)}\s+Bunker\s+Price\s+Forecast",
+            r"Bunker\s+Price\s+Forecast",
+        ]
         heading = None
         for pat in heading_patterns:
             heading = soup.find(string=re.compile(pat, re.I))
-            if heading: break
+            if heading:
+                break
         search_root = heading.parent if heading else soup
         table = None
         cur = search_root
         for _ in range(10):
-            if cur is None: break
+            if cur is None:
+                break
             table = cur.find_next("table")
-            if table: break
+            if table:
+                break
             cur = cur.parent
-        if table is None: table = soup.find("table")
+        if table is None:
+            table = soup.find("table")
         if table:
             rows = []
             for tr in table.find_all("tr"):
-                cells = [c.get_text(" ", strip=True) for c in tr.find_all(["th", "td"])]
-                if cells: rows.append(cells)
+                cells = [
+                    c.get_text(" ", strip=True)
+                    for c in tr.find_all(["th", "td"])
+                ]
+                if cells:
+                    rows.append(cells)
             if rows:
                 max_len = max(len(r) for r in rows)
                 rows = [r + [""] * (max_len - len(r)) for r in rows]
@@ -334,8 +406,11 @@ def parse_bunker_forecast_from_html(html, port_name):
                 if not normalized.empty:
                     normalized["port"] = port_name
                     return normalized
-    except Exception as e: errors.append(f"bs4: {e}")
-    raise RuntimeError(f"{port_name} Forecast Parse Error: " + " | ".join(errors))
+    except Exception as e:
+        errors.append(f"bs4: {e}")
+    raise RuntimeError(
+        f"{port_name} Forecast Parse Error: " + " | ".join(errors)
+    )
 
 def collect_all_forecast_data(existing_driver=None):
     owns_driver = existing_driver is None
@@ -345,18 +420,21 @@ def collect_all_forecast_data(existing_driver=None):
     try:
         for port_name, url in FORECAST_URLS.items():
             try:
-                print(f"[INFO] Forecast 접속: {port_name}")
+                print(f"[INFO] Forecast 접속: {port_name}", flush=True)
                 driver.get(url)
                 time.sleep(4)
                 html = driver.page_source
-                forecast_df = parse_bunker_forecast_from_html(html, port_name=port_name)
+                forecast_df = parse_bunker_forecast_from_html(
+                    html, port_name=port_name
+                )
                 forecast_df["port"] = port_name
                 forecast_df["source_url"] = url
                 frames.append(forecast_df)
             except Exception as e:
                 errors.append(f"{port_name}: {e}")
     finally:
-        if owns_driver: driver.quit()
+        if owns_driver:
+            driver.quit()
     if frames:
         out = pd.concat(frames, ignore_index=True, sort=False)
         save_dataframe_to_db(out, FORECAST_TABLE, FORECAST_TABLE)
@@ -366,32 +444,63 @@ def collect_all_forecast_data(existing_driver=None):
 
 def load_or_collect_forecast_data(force_refresh=False):
     if (not force_refresh) and FORECAST_CACHE["df"] is not None:
-        return FORECAST_CACHE["df"].copy(), FORECAST_CACHE["fetched_at"], FORECAST_CACHE.get("message", "")
+        return (
+            FORECAST_CACHE["df"].copy(),
+            FORECAST_CACHE["fetched_at"],
+            FORECAST_CACHE.get("message", ""),
+        )
     db_df, db_fetched_at = pd.DataFrame(), "-"
     try:
         db_df = load_dataframe_from_db(FORECAST_TABLE)
         if not db_df.empty:
             for c in FORECAST_PRODUCT_COLUMNS:
-                if c in db_df.columns: db_df[c] = pd.to_numeric(db_df[c], errors="coerce")
-            if "graph_date" in db_df.columns: db_df["graph_date"] = pd.to_datetime(db_df["graph_date"], errors="coerce")
-            if "port" not in db_df.columns: db_df["port"] = "Rotterdam"
+                if c in db_df.columns:
+                    db_df[c] = pd.to_numeric(db_df[c], errors="coerce")
+            if "graph_date" in db_df.columns:
+                db_df["graph_date"] = pd.to_datetime(
+                    db_df["graph_date"], errors="coerce"
+                )
+            if "port" not in db_df.columns:
+                db_df["port"] = "Rotterdam"
             db_fetched_at = get_dataset_meta(FORECAST_TABLE)
-    except Exception as e: print(f"[WARN] DB Load Fail: {e}")
+    except Exception as e:
+        print(f"[WARN] DB Load Fail: {e}", flush=True)
     if not force_refresh and not db_df.empty:
-        FORECAST_CACHE["df"], FORECAST_CACHE["fetched_at"], FORECAST_CACHE["message"] = db_df.copy(), db_fetched_at, ""
+        (
+            FORECAST_CACHE["df"],
+            FORECAST_CACHE["fetched_at"],
+            FORECAST_CACHE["message"],
+        ) = (db_df.copy(), db_fetched_at, "")
         return db_df, db_fetched_at, ""
     try:
         df, msg = collect_all_forecast_data()
         fetched_at = get_dataset_meta(FORECAST_TABLE)
-        if fetched_at == "-": fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        FORECAST_CACHE["df"], FORECAST_CACHE["fetched_at"], FORECAST_CACHE["message"] = df.copy(), fetched_at, (f"Error: {msg}" if msg else "")
+        if fetched_at == "-":
+            fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        (
+            FORECAST_CACHE["df"],
+            FORECAST_CACHE["fetched_at"],
+            FORECAST_CACHE["message"],
+        ) = (df.copy(), fetched_at, (f"Error: {msg}" if msg else ""))
         return df, fetched_at, (f"Error: {msg}" if msg else "")
     except Exception as e:
         if not db_df.empty:
-            FORECAST_CACHE["df"], FORECAST_CACHE["fetched_at"], FORECAST_CACHE["message"] = db_df.copy(), db_fetched_at, str(e)
+            (
+                FORECAST_CACHE["df"],
+                FORECAST_CACHE["fetched_at"],
+                FORECAST_CACHE["message"],
+            ) = (db_df.copy(), db_fetched_at, str(e))
             return db_df, db_fetched_at, str(e)
-        empty = pd.DataFrame(columns=["port", "Period"] + FORECAST_PRODUCT_COLUMNS + ["graph_date", "source_url"])
-        FORECAST_CACHE["df"], FORECAST_CACHE["fetched_at"], FORECAST_CACHE["message"] = empty.copy(), "-", str(e)
+        empty = pd.DataFrame(
+            columns=["port", "Period"]
+            + FORECAST_PRODUCT_COLUMNS
+            + ["graph_date", "source_url"]
+        )
+        (
+            FORECAST_CACHE["df"],
+            FORECAST_CACHE["fetched_at"],
+            FORECAST_CACHE["message"],
+        ) = (empty.copy(), "-", str(e))
         return empty, "-", str(e)
 
 def collect_all_data():
@@ -399,7 +508,7 @@ def collect_all_data():
     all_rows = []
     try:
         for url in URLS:
-            print(f"[INFO] VLSFO 접속: {url}")
+            print(f"[INFO] VLSFO 접속: {url}", flush=True)
             driver.get(url)
             time.sleep(4)
             try_click_all_for_vlsfo(driver)
@@ -408,22 +517,36 @@ def collect_all_data():
             for item in extracted:
                 port = item["seriesName"].replace(" VLSFO", "").strip()
                 for p in item["data"]:
-                    if p is None or p.get("x") is None or p.get("y") is None: continue
+                    if (
+                        p is None
+                        or p.get("x") is None
+                        or p.get("y") is None
+                    ):
+                        continue
                     all_rows.append({
-                        "port": port, "series_name": item["seriesName"],
-                        "source_type": item["sourceType"], "timestamp_ms": p["x"],
-                        "price": p["y"], "source_url": url,
+                        "port": port,
+                        "series_name": item["seriesName"],
+                        "source_type": item["sourceType"],
+                        "timestamp_ms": p["x"],
+                        "price": p["y"],
+                        "source_url": url,
                     })
-    finally: driver.quit()
+    finally:
+        driver.quit()
     df = pd.DataFrame(all_rows)
-    if df.empty: return df
+    if df.empty:
+        return df
     df["timestamp_ms"] = pd.to_numeric(df["timestamp_ms"], errors="coerce")
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
     df = df.dropna(subset=["timestamp_ms", "price"])
     df["date"] = pd.to_datetime(df["timestamp_ms"], unit="ms", errors="coerce")
     df = df.dropna(subset=["date"])
     df["date_str"] = df["date"].dt.strftime("%Y-%m-%d")
-    df = df.drop_duplicates(subset=["port", "date_str", "price"]).sort_values(["port", "date"]).reset_index(drop=True)
+    df = (
+        df.drop_duplicates(subset=["port", "date_str", "price"])
+        .sort_values(["port", "date"])
+        .reset_index(drop=True)
+    )
     save_dataframe_to_db(df, PRODUCT_TABLE, PRODUCT_TABLE)
     return df
 
@@ -436,172 +559,380 @@ def load_or_collect_data(force_refresh=False):
         if not db_df.empty:
             db_df["date"] = pd.to_datetime(db_df["date"], errors="coerce")
             db_df = db_df.dropna(subset=["date"])
-            if "price" in db_df.columns: db_df["price"] = pd.to_numeric(db_df["price"], errors="coerce")
-            if "timestamp_ms" in db_df.columns: db_df["timestamp_ms"] = pd.to_numeric(db_df["timestamp_ms"], errors="coerce")
+            if "price" in db_df.columns:
+                db_df["price"] = pd.to_numeric(db_df["price"], errors="coerce")
+            if "timestamp_ms" in db_df.columns:
+                db_df["timestamp_ms"] = pd.to_numeric(
+                    db_df["timestamp_ms"], errors="coerce"
+                )
             db_fetched_at = get_dataset_meta(PRODUCT_TABLE)
-    except Exception as e: print(f"[WARN] DB Load Fail: {e}")
+    except Exception as e:
+        print(f"[WARN] DB Load Fail: {e}", flush=True)
     if not force_refresh and not db_df.empty:
         DATA_CACHE["df"], DATA_CACHE["fetched_at"] = db_df.copy(), db_fetched_at
         return db_df, db_fetched_at
     try:
         fresh_df = collect_all_data()
-        if fresh_df.empty: raise RuntimeError("No VLSFO data collected.")
+        if fresh_df.empty:
+            raise RuntimeError("No VLSFO data collected.")
         fetched_at = get_dataset_meta(PRODUCT_TABLE)
-        if fetched_at == "-": fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if fetched_at == "-":
+            fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         DATA_CACHE["df"], DATA_CACHE["fetched_at"] = fresh_df.copy(), fetched_at
         return fresh_df, fetched_at
     except Exception as e:
         if not db_df.empty:
-            DATA_CACHE["df"], DATA_CACHE["fetched_at"] = db_df.copy(), db_fetched_at
+            DATA_CACHE["df"], DATA_CACHE["fetched_at"] = (
+                db_df.copy(),
+                db_fetched_at,
+            )
             return db_df, db_fetched_at
         raise e
 
-# =========================
+# =========================================================
 # 4. Charting & Dashboard Building
-# =========================
+# =========================================================
 def filter_df(df, ports=None, start_date=None, end_date=None):
-    if df.empty: return df.copy()
+    if df.empty:
+        return df.copy()
     out = df.copy()
-    if ports: out = out[out["port"].isin(ports)]
-    if start_date: out = out[out["date"] >= pd.to_datetime(start_date)]
-    if end_date: out = out[out["date"] <= pd.to_datetime(end_date)]
+    if ports:
+        out = out[out["port"].isin(ports)]
+    if start_date:
+        out = out[out["date"] >= pd.to_datetime(start_date)]
+    if end_date:
+        out = out[out["date"] <= pd.to_datetime(end_date)]
     return out.sort_values(["port", "date"]).reset_index(drop=True)
 
 def add_features(df, ma_mode="quarterly"):
-    if df.empty: return df.copy()
+    if df.empty:
+        return df.copy()
     out = df.copy().sort_values(["port", "date"])
     window_map = {"quarterly": 90, "semiannual": 180, "annual": 365}
     if ma_mode in window_map:
-        out["ma"] = out.groupby("port")["price"].transform(lambda s: s.rolling(window_map[ma_mode], min_periods=1).mean())
-    else: out["ma"] = pd.NA
+        out["ma"] = out.groupby("port")["price"].transform(
+            lambda s: s.rolling(window_map[ma_mode], min_periods=1).mean()
+        )
+    else:
+        out["ma"] = pd.NA
     out["daily_change"] = out.groupby("port")["price"].diff()
     return out
 
-def add_forecast_to_chart_df(df, forecast_df, selected_ports=None, start_date=None, end_date=None):
-    if forecast_df is None or forecast_df.empty or "VLSFO" not in forecast_df.columns: return df
+def add_forecast_to_chart_df(
+    df, forecast_df, selected_ports=None, start_date=None, end_date=None
+):
+    if (
+        forecast_df is None
+        or forecast_df.empty
+        or "VLSFO" not in forecast_df.columns
+    ):
+        return df
     fc = forecast_df.copy()
-    if "port" not in fc.columns: fc["port"] = "Rotterdam"
+    if "port" not in fc.columns:
+        fc["port"] = "Rotterdam"
     fc["graph_date"] = pd.to_datetime(fc["graph_date"], errors="coerce")
     fc = fc.dropna(subset=["graph_date", "VLSFO", "port"])
-    if selected_ports: fc = fc[fc["port"].isin(selected_ports)]
-    if start_date: fc = fc[fc["graph_date"] >= pd.to_datetime(start_date)]
-    if end_date: fc = fc[fc["graph_date"] <= pd.to_datetime(end_date)]
-    if fc.empty: return df
+    if selected_ports:
+        fc = fc[fc["port"].isin(selected_ports)]
+    if start_date:
+        fc = fc[fc["graph_date"] >= pd.to_datetime(start_date)]
+    if end_date:
+        fc = fc[fc["graph_date"] <= pd.to_datetime(end_date)]
+    if fc.empty:
+        return df
     rows = pd.DataFrame({
-        "port": fc["port"].astype(str), "series_name": fc["port"].astype(str) + " VLSFO Forecast",
-        "source_type": "forecast", "timestamp_ms": (fc["graph_date"].astype("int64") // 10**6),
-        "price": fc["VLSFO"].astype(float), "source_url": fc.get("source_url", ""),
-        "date": fc["graph_date"], "date_str": fc["graph_date"].dt.strftime("%Y-%m-%d"), "is_forecast": True,
+        "port": fc["port"].astype(str),
+        "series_name": fc["port"].astype(str) + " VLSFO Forecast",
+        "source_type": "forecast",
+        "timestamp_ms": (fc["graph_date"].astype("int64") // 10**6),
+        "price": fc["VLSFO"].astype(float),
+        "source_url": fc.get("source_url", ""),
+        "date": fc["graph_date"],
+        "date_str": fc["graph_date"].dt.strftime("%Y-%m-%d"),
+        "is_forecast": True,
     })
     base = df.copy()
-    if "is_forecast" not in base.columns: base["is_forecast"] = False
+    if "is_forecast" not in base.columns:
+        base["is_forecast"] = False
     combined = pd.concat([base, rows], ignore_index=True, sort=False)
-    return combined.drop_duplicates(subset=["port", "date_str", "price"], keep="first").sort_values(["port", "date"]).reset_index(drop=True)
+    return (
+        combined.drop_duplicates(
+            subset=["port", "date_str", "price"], keep="first"
+        )
+        .sort_values(["port", "date"])
+        .reset_index(drop=True)
+    )
 
 def port_color(port):
-    return {"Rotterdam": TAC_BLUE, "Fujairah": TAC_GREEN, "Singapore": TAC_PURPLE}.get(port, TAC_ORANGE)
+    return {
+        "Rotterdam": TAC_BLUE,
+        "Fujairah": TAC_GREEN,
+        "Singapore": TAC_PURPLE,
+    }.get(port, TAC_ORANGE)
 
 def apply_style(fig, height=460):
     fig.update_layout(
-        template="plotly_white", height=height, margin=dict(l=20, r=20, t=20, b=20),
-        font=dict(family="Pretendard, -apple-system, sans-serif", color=TAC_TEXT, size=12),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(255,255,255,0.85)"),
-        xaxis=dict(showgrid=True, gridcolor="#f1f5f9"), yaxis=dict(showgrid=True, gridcolor="#f1f5f9")
+        template="plotly_white",
+        height=height,
+        margin=dict(l=20, r=20, t=20, b=20),
+        font=dict(
+            family="Pretendard, -apple-system, sans-serif",
+            color=TAC_TEXT,
+            size=12,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.85)",
+        ),
+        xaxis=dict(showgrid=True, gridcolor="#f1f5f9"),
+        yaxis=dict(showgrid=True, gridcolor="#f1f5f9"),
     )
     return fig
 
 def split_past_future_for_plot(sub, date_col="date", value_col="price"):
-    if sub is None or sub.empty: return sub, sub
+    if sub is None or sub.empty:
+        return sub, sub
     work = sub.copy().sort_values(date_col)
     work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
     work = work.dropna(subset=[date_col])
     today = pd.Timestamp.today().normalize()
-    past, future = work[work[date_col] <= today].copy(), work[work[date_col] > today].copy()
-    if not past.empty and not future.empty: future = pd.concat([past.tail(1), future], ignore_index=True)
+    past = work[work[date_col] <= today].copy()
+    future = work[work[date_col] > today].copy()
+    if not past.empty and not future.empty:
+        future = pd.concat([past.tail(1), future], ignore_index=True)
     return past, future
 
-def add_solid_future_dashed_trace(fig, sub, x_col, y_col, name, color, width=2.6, mode="lines+markers", marker_size=5, showlegend=True, hovertemplate=None):
+def add_solid_future_dashed_trace(
+    fig,
+    sub,
+    x_col,
+    y_col,
+    name,
+    color,
+    width=2.6,
+    mode="lines+markers",
+    marker_size=5,
+    showlegend=True,
+    hovertemplate=None,
+):
     past, future = split_past_future_for_plot(sub, date_col=x_col, value_col=y_col)
     if not past.empty:
-        fig.add_trace(go.Scatter(x=past[x_col], y=past[y_col], mode=mode, name=name, line=dict(color=color, width=width), marker=dict(size=marker_size) if "markers" in mode else None, hovertemplate=hovertemplate, showlegend=showlegend))
+        fig.add_trace(
+            go.Scatter(
+                x=past[x_col],
+                y=past[y_col],
+                mode=mode,
+                name=name,
+                line=dict(color=color, width=width),
+                marker=dict(size=marker_size) if "markers" in mode else None,
+                hovertemplate=hovertemplate,
+                showlegend=showlegend,
+            )
+        )
     if not future.empty:
-        fig.add_trace(go.Scatter(x=future[x_col], y=future[y_col], mode=mode, name=f"{name} Forecast", line=dict(color=color, width=width, dash="dot"), marker=dict(size=marker_size, symbol="circle-open") if "markers" in mode else None, hovertemplate=hovertemplate, showlegend=showlegend))
+        fig.add_trace(
+            go.Scatter(
+                x=future[x_col],
+                y=future[y_col],
+                mode=mode,
+                name=f"{name} Forecast",
+                line=dict(color=color, width=width, dash="dot"),
+                marker=(
+                    dict(size=marker_size, symbol="circle-open")
+                    if "markers" in mode
+                    else None
+                ),
+                hovertemplate=hovertemplate,
+                showlegend=showlegend,
+            )
+        )
 
 def build_line_chart(df, ma_mode="quarterly"):
-    if df.empty: return '<div class="empty">No Data</div>'
+    if df.empty:
+        return '<div class="empty">No Data</div>'
     fig = go.Figure()
     for port in sorted(df["port"].unique()):
         sub = df[df["port"] == port].sort_values("date")
         color = port_color(port)
-        add_solid_future_dashed_trace(fig, sub, "date", "price", f"{port} Price", color)
+        add_solid_future_dashed_trace(
+            fig, sub, "date", "price", f"{port} Price", color
+        )
         if ma_mode != "off" and "ma" in sub.columns:
             ma_sub = sub.dropna(subset=["ma"]).copy()
-            add_solid_future_dashed_trace(fig, ma_sub, "date", "ma", f"{port} {ma_mode} MA", color, width=1.5, mode="lines", marker_size=0)
+            add_solid_future_dashed_trace(
+                fig,
+                ma_sub,
+                "date",
+                "ma",
+                f"{port} {ma_mode} MA",
+                color,
+                width=1.5,
+                mode="lines",
+                marker_size=0,
+            )
     today_str = pd.Timestamp.today().normalize().strftime("%Y-%m-%d")
     fig.add_vline(x=today_str, line_dash="dash", line_color="#64748b")
-    fig.update_layout(xaxis_title="Date", yaxis_title="USD/MT", xaxis=dict(rangeslider=dict(visible=True), type="date"))
+    fig.update_layout(
+        xaxis_title="Date",
+        yaxis_title="USD/MT",
+        xaxis=dict(rangeslider=dict(visible=True), type="date"),
+    )
     apply_style(fig, height=500)
     return fig.to_html(full_html=False, include_plotlyjs="cdn")
 
 def build_latest_bar_chart(df):
-    if df.empty: return '<div class="empty">No Data</div>'
-    latest_df = df[df["date"] == df["date"].max()].copy().sort_values("price", ascending=False)
-    fig = go.Figure(go.Bar(x=latest_df["port"], y=latest_df["price"], text=[f"{v:.1f}" for v in latest_df["price"]], textposition="outside", marker_color=[port_color(p) for p in latest_df["port"]], showlegend=False))
+    if df.empty:
+        return '<div class="empty">No Data</div>'
+    latest_df = (
+        df[df["date"] == df["date"].max()]
+        .copy()
+        .sort_values("price", ascending=False)
+    )
+    fig = go.Figure(
+        go.Bar(
+            x=latest_df["port"],
+            y=latest_df["price"],
+            text=[f"{v:.1f}" for v in latest_df["price"]],
+            textposition="outside",
+            marker_color=[port_color(p) for p in latest_df["port"]],
+            showlegend=False,
+        )
+    )
     fig.update_layout(xaxis_title="Port", yaxis_title="USD/MT")
     apply_style(fig, height=400)
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 def build_spread_chart(df):
-    if df.empty: return '<div class="empty">No Data</div>'
-    pivot_df = df.pivot_table(index="date", columns="port", values="price", aggfunc="mean").reset_index()
+    if df.empty:
+        return '<div class="empty">No Data</div>'
+    pivot_df = df.pivot_table(
+        index="date", columns="port", values="price", aggfunc="mean"
+    ).reset_index()
     fig = go.Figure()
     if "Rotterdam" in pivot_df.columns and "Singapore" in pivot_df.columns:
-        fig.add_trace(go.Scatter(x=pivot_df["date"], y=pivot_df["Rotterdam"] - pivot_df["Singapore"], mode="lines", name="RTM - SIN", line=dict(color=TAC_BLUE, width=2.5)))
+        fig.add_trace(
+            go.Scatter(
+                x=pivot_df["date"],
+                y=pivot_df["Rotterdam"] - pivot_df["Singapore"],
+                mode="lines",
+                name="RTM - SIN",
+                line=dict(color=TAC_BLUE, width=2.5),
+            )
+        )
     if "Fujairah" in pivot_df.columns and "Singapore" in pivot_df.columns:
-        fig.add_trace(go.Scatter(x=pivot_df["date"], y=pivot_df["Fujairah"] - pivot_df["Singapore"], mode="lines", name="FJR - SIN", line=dict(color=TAC_RED, width=2.5)))
+        fig.add_trace(
+            go.Scatter(
+                x=pivot_df["date"],
+                y=pivot_df["Fujairah"] - pivot_df["Singapore"],
+                mode="lines",
+                name="FJR - SIN",
+                line=dict(color=TAC_RED, width=2.5),
+            )
+        )
     fig.add_hline(y=0, line_dash="dash", line_color="#94a3b8")
     fig.update_layout(xaxis_title="Date", yaxis_title="Spread (USD/MT)")
     apply_style(fig, height=400)
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 def build_kpis(df):
-    if df.empty: return {"latest_date": "-", "avg_price": "-", "row_count": "0", "port_values": {}}
+    if df.empty:
+        return {
+            "latest_date": "-",
+            "avg_price": "-",
+            "row_count": "0",
+            "port_values": {},
+        }
     latest_date = df["date"].max()
     latest_df = df[df["date"] == latest_date].copy()
-    port_values = {p: f"{sub['price'].iloc[0]:.1f}" for p in sorted(df["port"].dropna().unique()) if not (sub := latest_df[latest_df["port"] == p]).empty}
-    return {"latest_date": latest_date.strftime("%Y-%m-%d"), "avg_price": f"{df['price'].mean():.1f}", "row_count": f"{len(df):,}", "port_values": port_values}
+    port_values = {
+        p: f"{sub['price'].iloc[0]:.1f}"
+        for p in sorted(df["port"].dropna().unique())
+        if not (sub := latest_df[latest_df["port"] == p]).empty
+    }
+    return {
+        "latest_date": latest_date.strftime("%Y-%m-%d"),
+        "avg_price": f"{df['price'].mean():.1f}",
+        "row_count": f"{len(df):,}",
+        "port_values": port_values,
+    }
 
 def compute_period_change_kpis(df):
-    if df.empty: return []
+    if df.empty:
+        return []
     result = []
     period_defs = [("QoQ", "QE"), ("HoH", "2QE"), ("YoY", "YE")]
     for port in ["Fujairah", "Rotterdam", "Singapore"]:
         sub = df[df["port"] == port].copy().sort_values("date")
         item = {"port": port, "metrics": []}
         if sub.empty:
-            for label, _ in period_defs: item["metrics"].append({"label": label, "value": "N/A", "class_name": "neutral"})
-            result.append(item); continue
+            for label, _ in period_defs:
+                item["metrics"].append({
+                    "label": label,
+                    "value": "N/A",
+                    "class_name": "neutral",
+                })
+            result.append(item)
+            continue
         for label, freq in period_defs:
-            temp = sub.set_index("date").resample(freq)["price"].mean().dropna().reset_index()
-            if len(temp) < 2: item["metrics"].append({"label": label, "value": "N/A", "class_name": "neutral"}); continue
+            temp = (
+                sub.set_index("date")
+                .resample(freq)["price"]
+                .mean()
+                .dropna()
+                .reset_index()
+            )
+            if len(temp) < 2:
+                item["metrics"].append({
+                    "label": label,
+                    "value": "N/A",
+                    "class_name": "neutral",
+                })
+                continue
             curr, prev = temp.iloc[-1]["price"], temp.iloc[-2]["price"]
             change_pct = (curr - prev) / prev * 100
-            cls = "up" if change_pct > 0 else "down" if change_pct < 0 else "neutral"
-            item["metrics"].append({"label": label, "value": f"{change_pct:+.2f}%", "class_name": cls})
+            cls = (
+                "up"
+                if change_pct > 0
+                else "down"
+                if change_pct < 0
+                else "neutral"
+            )
+            item["metrics"].append({
+                "label": label,
+                "value": f"{change_pct:+.2f}%",
+                "class_name": cls,
+            })
         result.append(item)
     return result
 
 def build_forecast_table_html(forecast_df, fetched_at="-", message=""):
-    if forecast_df is None or forecast_df.empty: return '<div class="empty">No Forecast Data</div>'
+    if forecast_df is None or forecast_df.empty:
+        return '<div class="empty">No Forecast Data</div>'
     blocks = []
     for port_name in ALL_PORTS:
         sub = forecast_df[forecast_df["port"] == port_name].copy()
-        if sub.empty: continue
+        if sub.empty:
+            continue
         rows = []
         for _, r in sub.iterrows():
             period = str(r.get("Period", ""))
-            cells = [("-" if pd.isna(r.get(c)) else f"{float(r.get(c)):,.0f}") for c in FORECAST_PRODUCT_COLUMNS]
-            rows.append(f"<tr><th style='text-align:left; padding:8px;'>{period}</th>" + "".join([f"<td style='padding:8px;'>{c}</td>" for c in cells]) + "</tr>")
+            cells = [
+                (
+                    "-"
+                    if pd.isna(r.get(c))
+                    else f"{float(r.get(c)):,.0f}"
+                )
+                for c in FORECAST_PRODUCT_COLUMNS
+            ]
+            rows.append(
+                f"<tr><th style='text-align:left; padding:8px;'>{period}</th>"
+                + "".join([f"<td style='padding:8px;'>{c}</td>" for c in cells])
+                + "</tr>"
+            )
         blocks.append(f"""
         <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: white; margin-bottom: 12px;">
           <div style="background: #1e293b; color: white; padding: 8px 12px; font-weight: 700; font-size: 14px;">{port_name} Bunker Price Forecast</div>
@@ -610,11 +941,11 @@ def build_forecast_table_html(forecast_df, fetched_at="-", message=""):
             <tbody>{''.join(rows)}</tbody>
           </table>
         </div>""")
-    return ''.join(blocks)
+    return "".join(blocks)
 
-# =========================
+# =========================================================
 # 5. Web Engine (Flask)
-# =========================
+# =========================================================
 HTML = """
 <!doctype html>
 <html lang="ko">
@@ -649,9 +980,9 @@ body { font-family: 'Pretendard', sans-serif; background: var(--bg); color: var(
 .controls form { display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end; }
 .controls label { display: block; font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 4px; }
 .controls select, .controls input { padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1; }
-.btn-link { text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 4px; color: white; }
-.btn-green { background: var(--TAC_GREEN); }
-.btn-dark { background: var(--TAC_BLUE_DARK); }
+.btn-link { text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 4px; color: white; display: inline-block; }
+.btn-green { background: #27ae60; }
+.btn-dark { background: #1f3447; }
 @media (max-width: 900px) { .row2, .port-kpi-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -680,17 +1011,23 @@ body { font-family: 'Pretendard', sans-serif; background: var(--bg); color: var(
     </form>
   </div>
   {% else %}
-  <div class="card"><p class="lead">Static Dashboard Mode (GitHub Pages)</p><a class="btn-link btn-green" href="{{ download_url }}">Download CSV</a></div>
+  <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <div class="card-title" style="margin-bottom: 4px;">Static Dashboard Mode (GitHub Pages)</div>
+      <p class="meta">데이터는 주기적으로 크롤링되어 최신 상태로 유지됩니다.</p>
+    </div>
+    <a class="btn-link btn-green" href="{{ download_url }}" download>📥 Download CSV</a>
+  </div>
   {% endif %}
 
   <div class="card">
     <div class="card-title">Market Snapshot</div>
     <div class="kpi-grid">
       <div class="kpi-card"><div class="kpi-label">Latest Date</div><div class="kpi-value">{{ kpis.latest_date }}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Avg Price</div><div class="kpi-value">{{ kpis.avg_price }}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Rotterdam</div><div class="kpi-value">{{ kpis.port_values.get('Rotterdam', '-') }}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Fujairah</div><div class="kpi-value">{{ kpis.port_values.get('Fujairah', '-') }}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Singapore</div><div class="kpi-value">{{ kpis.port_values.get('Singapore', '-') }}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg Price</div><div class="kpi-value">${{ kpis.avg_price }}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Rotterdam</div><div class="kpi-value">${{ kpis.port_values.get('Rotterdam', '-') }}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Fujairah</div><div class="kpi-value">${{ kpis.port_values.get('Fujairah', '-') }}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Singapore</div><div class="kpi-value">${{ kpis.port_values.get('Singapore', '-') }}</div></div>
     </div>
   </div>
 
@@ -731,9 +1068,9 @@ body { font-family: 'Pretendard', sans-serif; background: var(--bg); color: var(
 </html>
 """
 
-# =========================
+# =========================================================
 # 6. Dashboard Rendering Logic
-# =========================
+# =========================================================
 def render_product_dashboard(force_refresh=False, static_mode=False):
     message = ""
     try:
@@ -743,100 +1080,214 @@ def render_product_dashboard(force_refresh=False, static_mode=False):
         message = f"VLSFO Load Error: {e}"
 
     try:
-        forecast_df, forecast_fetched_at, forecast_message = load_or_collect_forecast_data(force_refresh=force_refresh)
+        (
+            forecast_df,
+            forecast_fetched_at,
+            forecast_message,
+        ) = load_or_collect_forecast_data(force_refresh=force_refresh)
     except Exception as e:
-        forecast_df, forecast_fetched_at, forecast_message = pd.DataFrame(), "-", str(e)
+        forecast_df, forecast_fetched_at, forecast_message = (
+            pd.DataFrame(),
+            "-",
+            str(e),
+        )
 
     selected_ports = ALL_PORTS.copy()
     ma_mode = "quarterly"
     start_date, end_date = "", ""
 
-    filtered_df = filter_df(df, ports=selected_ports, start_date=None, end_date=None)
+    if not static_mode and request:
+        req_ports = request.args.getlist("ports")
+        if req_ports:
+            selected_ports = req_ports
+        ma_mode = request.args.get("ma_mode", "quarterly")
+        start_date = request.args.get("start_date", "")
+        end_date = request.args.get("end_date", "")
+
+    filtered_df = filter_df(
+        df, ports=selected_ports, start_date=start_date, end_date=end_date
+    )
     filtered_df = add_features(filtered_df, ma_mode=ma_mode)
-    chart_df = add_forecast_to_chart_df(filtered_df, forecast_df, selected_ports=selected_ports)
+    chart_df = add_forecast_to_chart_df(
+        filtered_df,
+        forecast_df,
+        selected_ports=selected_ports,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     kpis = build_kpis(filtered_df)
     line_chart = build_line_chart(chart_df, ma_mode=ma_mode)
     bar_chart = build_latest_bar_chart(filtered_df)
     spread_chart = build_spread_chart(filtered_df)
     period_change_kpis = compute_period_change_kpis(filtered_df)
-    forecast_table_html = build_forecast_table_html(forecast_df, fetched_at=forecast_fetched_at, message=forecast_message)
+    forecast_table_html = build_forecast_table_html(
+        forecast_df, fetched_at=forecast_fetched_at, message=forecast_message
+    )
 
     if static_mode:
-        download_url, refresh_url, product_href, oil_href = "./shipandbunker_vlsfo.csv", "#", STATIC_PRODUCT_HREF, STATIC_OIL_HREF
+        download_url = "./shipandbunker_vlsfo.csv"
+        refresh_url = "#"
+        product_href = STATIC_PRODUCT_HREF
+        oil_href = STATIC_OIL_HREF
     else:
-        ports_q = "".join(f"&ports={urllib.parse.quote(p)}" for p in selected_ports)
+        ports_q = "".join(
+            f"&ports={urllib.parse.quote(p)}" for p in selected_ports
+        )
         date_q = f"&start_date={urllib.parse.quote(start_date)}&end_date={urllib.parse.quote(end_date)}"
         download_url = f"/download_csv?ma_mode={ma_mode}{ports_q}{date_q}"
         refresh_url = f"/?ma_mode={ma_mode}{ports_q}{date_q}&refresh=1"
         product_href, oil_href = "/product", "/oil"
 
     return render_template_string(
-        HTML, fetched_at=fetched_at, all_ports=ALL_PORTS, selected_ports=selected_ports,
-        ma_mode=ma_mode, start_date=start_date, end_date=end_date, kpis=kpis,
-        line_chart=line_chart, bar_chart=bar_chart, spread_chart=spread_chart,
-        period_change_kpis=period_change_kpis, forecast_table_html=forecast_table_html,
-        download_url=download_url, refresh_url=refresh_url, static_mode=static_mode,
-        product_href=product_href, oil_href=oil_href, message=message
+        HTML,
+        fetched_at=fetched_at,
+        all_ports=ALL_PORTS,
+        selected_ports=selected_ports,
+        ma_mode=ma_mode,
+        start_date=start_date,
+        end_date=end_date,
+        kpis=kpis,
+        line_chart=line_chart,
+        bar_chart=bar_chart,
+        spread_chart=spread_chart,
+        period_change_kpis=period_change_kpis,
+        forecast_table_html=forecast_table_html,
+        download_url=download_url,
+        refresh_url=refresh_url,
+        static_mode=static_mode,
+        product_href=product_href,
+        oil_href=oil_href,
+        message=message,
     )
 
 @app.route("/")
 @app.route("/product")
 def index():
     force_refresh = request.args.get("refresh", "0") == "1"
-    return render_product_dashboard(force_refresh=force_refresh, static_mode=False)
+    return render_product_dashboard(
+        force_refresh=force_refresh, static_mode=False
+    )
 
-# =========================
+@app.route("/download_csv")
+def download_csv():
+    df, _ = load_or_collect_data(force_refresh=False)
+    csv_data = df.to_csv(index=False, encoding="utf-8-sig")
+    return Response(
+        csv_data,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=shipandbunker_vlsfo.csv"
+            )
+        },
+    )
+
+# =========================================================
 # 7. CLI / Cron Execution
-# =========================
+# =========================================================
 def export_static_csv_files(df, forecast_df):
-    pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d").to_csv(BASE_DIR / "shipandbunker_vlsfo.csv", index=False)
-    pd.to_datetime(forecast_df["graph_date"]).dt.strftime("%Y-%m-%d").to_csv(BASE_DIR / "bunker_forecast.csv", index=False)
+    if df is not None and not df.empty:
+        export_df = df.copy()
+        if "date" in export_df.columns:
+            export_df["date"] = pd.to_datetime(
+                export_df["date"], errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+        export_df.to_csv(
+            BASE_DIR / "shipandbunker_vlsfo.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+    if forecast_df is not None and not forecast_df.empty:
+        export_fc = forecast_df.copy()
+        if "graph_date" in export_fc.columns:
+            export_fc["graph_date"] = pd.to_datetime(
+                export_fc["graph_date"], errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+        export_fc.to_csv(
+            BASE_DIR / "bunker_forecast.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
 
 def run_cron_job():
-    print("[INFO] Starting Cron Job...")
+    print("[INFO] Starting Cron Job...", flush=True)
     df, _ = load_or_collect_data(force_refresh=True)
     forecast_df, _, _ = load_or_collect_forecast_data(force_refresh=True)
     export_static_csv_files(df, forecast_df)
-    html_content = render_product_dashboard(force_refresh=False, static_mode=True)
+    with app.app_context():
+        html_content = render_product_dashboard(
+            force_refresh=False, static_mode=True
+        )
     (BASE_DIR / "index.html").write_text(html_content, encoding="utf-8")
-    print("[INFO] Cron Job Finished. index.html generated.")
+    print(
+        "[INFO] Cron Job Finished. index.html and CSV files generated.",
+        flush=True,
+    )
 
-def find_available_port(host):
-    import socket
+def find_available_port(host="127.0.0.1", preferred=5003):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        s.bind((host, preferred))
+        port = preferred
+    except Exception:
         s.bind((host, 0))
         port = s.getsockname()[1]
+    finally:
         s.close()
-        return port
-    except: return 8080
+    return port
 
-def wait_and_open_browser(url, port):
-    time.sleep(2)
-    webbrowser.open(url)
+def wait_and_open_browser(url, port, timeout=20):
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                webbrowser.open_new(url)
+                return
+        except Exception:
+            time.sleep(0.4)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bunker Price Dashboard")
-    parser.add_argument("--crawl-only", action="store_true", help="크롤링 및 DB 저장/빌드만 수행하고 종료")
+    parser.add_argument(
+        "--crawl-only",
+        action="store_true",
+        help="크롤링 및 DB 저장/정적 파일 빌드만 수행하고 종료",
+    )
     parser.add_argument("--port", type=int, default=5003, help="Flask 포트")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Flask 호스트")
+    parser.add_argument(
+        "--no-open", action="store_true", help="브라우저 자동 열기 방지"
+    )
     args, unknown = parser.parse_known_args()
 
-    # 1) 먼저 크롤링 및 DB 업데이트 실행
-    try:
-        print("[Bunker] Initializing data crawl...")
-        refresh_product_data()
-        refresh_forecast_data()
-        print("[Bunker] Crawl and DB update completed.")
-    except Exception as e:
-        print(f"[Bunker] Crawl error: {e}")
-
-    # 2) GitHub Actions 환경이거나 --crawl-only 옵션인 경우 Flask 서버를 띄우지 않고 바로 정상 종료
-    import os
+    # 1) GitHub Actions 환경이거나 --crawl-only 옵션인 경우
     if os.environ.get("GITHUB_ACTIONS") == "true" or args.crawl_only:
-        print("[Bunker] GitHub Actions detected: exiting after crawl completion.")
-        sys.exit(0)
+        try:
+            run_cron_job()
+            sys.exit(0)
+        except Exception as e:
+            print(f"[Bunker] Static build error: {e}", flush=True)
+            sys.exit(1)
 
-    # 3) 로컬 PC에서 직접 실행했을 때만 대시보드 웹 서버 실행
-    app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
+    # 2) 로컬 PC 실행 시 초기 데이터 확인/수집
+    try:
+        print("[Bunker] Initializing data...", flush=True)
+        load_or_collect_data(force_refresh=False)
+        load_or_collect_forecast_data(force_refresh=False)
+    except Exception as e:
+        print(f"[Bunker] Init error: {e}", flush=True)
+
+    port = find_available_port(args.host, args.port)
+    local_url = f"http://{args.host}:{port}"
+    print(f"[INFO] Flask 서버 시작: {local_url}", flush=True)
+
+    if not args.no_open:
+        threading.Thread(
+            target=wait_and_open_browser,
+            args=(local_url, port),
+            daemon=True,
+        ).start()
+
+    app.run(host=args.host, port=port, debug=False, use_reloader=False)
