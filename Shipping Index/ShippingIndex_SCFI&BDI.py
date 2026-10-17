@@ -17,6 +17,10 @@ GitHub Actions 실행:
     - index_history.db
     - shipping_index_data.json
     - index.html
+    - index_crawl.log
+
+권장 패키지 설치:
+    pip install pandas selenium webdriver-manager
 """
 
 import argparse
@@ -27,7 +31,7 @@ import re
 import sqlite3
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 
@@ -36,6 +40,7 @@ from selenium import webdriver
 from selenium.common.exceptions import (
     NoAlertPresentException,
     TimeoutException,
+    WebDriverException,
 )
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -45,6 +50,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 try:
     from webdriver_manager.chrome import ChromeDriverManager
+
     HAS_WEBDRIVER_MANAGER = True
 except Exception:
     HAS_WEBDRIVER_MANAGER = False
@@ -63,6 +69,10 @@ BASE_URL = "https://www.ksg.co.kr/"
 
 SUPPORTED_INDEXES = ["SCFI", "BDI"]
 DEFAULT_INDEX_NAME = "SCFI"
+
+# 최근 데이터 정정 가능성에 대비하여 최신 DB 날짜보다
+# 14일 이전부터 다시 수집 후 UPSERT한다.
+OVERLAP_DAYS = 14
 
 BDI_REGION_PRIORITY = [
     "BDI",
@@ -117,7 +127,7 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
 def activate_file_logging():
-    """로컬 실행 시 로그 파일 기록을 활성화한다."""
+    """로컬 및 GitHub Actions 실행 로그를 파일에도 기록한다."""
     if any(
         isinstance(handler, logging.FileHandler)
         for handler in logger.handlers
@@ -142,12 +152,15 @@ def log(message):
 # 3. Common Utilities
 # =========================================================
 def normalize_index_name(index_name):
-    index_name = str(index_name or DEFAULT_INDEX_NAME).strip().upper()
+    index_name = str(
+        index_name or DEFAULT_INDEX_NAME
+    ).strip().upper()
 
-    if index_name in SUPPORTED_INDEXES:
-        return index_name
-
-    return DEFAULT_INDEX_NAME
+    return (
+        index_name
+        if index_name in SUPPORTED_INDEXES
+        else DEFAULT_INDEX_NAME
+    )
 
 def normalize_palette_name(name):
     allowed = ["Auto", "Grey", "Red", "Blue"]
@@ -155,12 +168,19 @@ def normalize_palette_name(name):
 
     return name if name in allowed else "Auto"
 
+def normalize_region_name(value):
+    """헤더/항목명 공백 및 개행을 정리한다."""
+    return " ".join(str(value or "").strip().split())
+
 def is_valid_region_for_index(region, index_name):
     """
     테이블의 날짜 열 및 불필요한 컬럼이 지수/항로로 저장되는 것을 방지한다.
     """
     index_name = normalize_index_name(index_name)
-    region = str(region or "").strip()
+    region = normalize_region_name(region)
+
+    if not region:
+        return False
 
     if region in INVALID_REGION_NAMES:
         return False
@@ -171,7 +191,7 @@ def is_valid_region_for_index(region, index_name):
     return True
 
 def display_region_label(region, index_name):
-    region = str(region).strip()
+    region = normalize_region_name(region)
     index_name = normalize_index_name(index_name)
 
     if index_name == "BDI":
@@ -184,7 +204,7 @@ def sort_regions_for_display(regions, index_name):
 
     cleaned = sorted(
         {
-            str(region).strip()
+            normalize_region_name(region)
             for region in regions
             if is_valid_region_for_index(region, index_name)
         }
@@ -192,8 +212,10 @@ def sort_regions_for_display(regions, index_name):
 
     if index_name == "BDI":
         priority = {
-            region: index
-            for index, region in enumerate(BDI_REGION_PRIORITY)
+            region: position
+            for position, region in enumerate(
+                BDI_REGION_PRIORITY
+            )
         }
 
         return sorted(
@@ -208,12 +230,18 @@ def sort_regions_for_display(regions, index_name):
 
 def parse_date(value):
     """KSG 테이블의 다양한 날짜 형식을 datetime.date로 정리한다."""
-    value = str(value).strip()
+    text = str(value or "").strip()
+
+    if not text:
+        return None
+
+    text = re.sub(r"\s+", "", text)
 
     formats = [
         "%Y-%m-%d",
         "%Y.%m.%d",
         "%Y/%m/%d",
+        "%Y%m%d",
         "%y-%m-%d",
         "%y.%m.%d",
         "%y/%m/%d",
@@ -222,7 +250,7 @@ def parse_date(value):
     for date_format in formats:
         try:
             return datetime.strptime(
-                value,
+                text,
                 date_format,
             ).date()
         except ValueError:
@@ -231,26 +259,72 @@ def parse_date(value):
     return None
 
 def clean_number(value):
-    """쉼표가 포함된 숫자 문자열을 float으로 정리한다."""
-    text = str(value).strip().replace(",", "")
+    """
+    쉼표·공백·통화기호 등이 포함된 문자열을 float으로 정리한다.
+    괄호형 음수도 지원한다.
+    """
+    text = str(value or "").strip()
 
     if not text:
         return None
 
-    if re.fullmatch(r"[+-]?\d+(\.\d+)?", text):
-        try:
-            return float(text)
-        except ValueError:
-            return None
+    if text.lower() in {
+        "-",
+        "n/a",
+        "na",
+        "none",
+        "null",
+    }:
+        return None
 
-    return None
+    is_negative = (
+        text.startswith("-")
+        or (
+            text.startswith("(")
+            and text.endswith(")")
+        )
+    )
+
+    cleaned = re.sub(
+        r"[^0-9.]",
+        "",
+        text.replace(",", ""),
+    )
+
+    if not cleaned:
+        return None
+
+    try:
+        number = float(cleaned)
+        return -number if is_negative else number
+    except ValueError:
+        return None
+
+def atomic_write_text(path, text):
+    """
+    GitHub Pages 배포 시 저장 도중 파일이 손상되는 것을 방지한다.
+    임시 파일 작성 후 원자적으로 교체한다.
+    """
+    temporary_path = path.with_suffix(
+        path.suffix + ".tmp"
+    )
+
+    temporary_path.write_text(
+        text,
+        encoding="utf-8",
+    )
+
+    temporary_path.replace(path)
 
 # =========================================================
 # 4. SQLite Database
 # =========================================================
 def get_db_conn():
     """SQLite 연결 및 테이블 생성."""
-    connection = sqlite3.connect(DB_PATH, timeout=30)
+    connection = sqlite3.connect(
+        DB_PATH,
+        timeout=30,
+    )
 
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=30000")
@@ -260,7 +334,7 @@ def get_db_conn():
         CREATE TABLE IF NOT EXISTS index_raw (
             dt TEXT NOT NULL,
             region TEXT NOT NULL,
-            value REAL,
+            value REAL NOT NULL,
             index_name TEXT NOT NULL,
             source_file TEXT,
             created_at TEXT,
@@ -284,23 +358,36 @@ def get_db_conn():
         """
     )
 
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_index_raw_name_date
+        ON index_raw (index_name, dt)
+        """
+    )
+
     connection.commit()
 
     return connection
 
 def cleanup_invalid_regions():
-    """기존 DB의 잘못된 날짜/컬럼명 기반 region 데이터를 정리한다."""
+    """
+    기존 DB의 날짜·헤더명 등 잘못 저장된 region 데이터를 정리한다.
+    """
     connection = get_db_conn()
 
     try:
-        placeholders = ",".join(["?"] * len(INVALID_REGION_NAMES))
+        invalid_names = list(INVALID_REGION_NAMES)
+
+        placeholders = ",".join(
+            ["?"] * len(invalid_names)
+        )
 
         connection.execute(
             f"""
             DELETE FROM index_raw
             WHERE TRIM(region) IN ({placeholders})
             """,
-            list(INVALID_REGION_NAMES),
+            invalid_names,
         )
 
         bdi_placeholders = ",".join(
@@ -361,7 +448,10 @@ def get_latest_date(index_name):
         if not row or not row[0]:
             return None
 
-        return pd.to_datetime(row[0]).date()
+        return pd.to_datetime(
+            row[0],
+            errors="coerce",
+        ).date()
 
     finally:
         connection.close()
@@ -411,10 +501,8 @@ def load_long_df_from_db(index_name):
         errors="coerce",
     )
 
-    dataframe["REGION"] = (
-        dataframe["REGION"]
-        .astype(str)
-        .str.strip()
+    dataframe["REGION"] = dataframe["REGION"].apply(
+        normalize_region_name
     )
 
     dataframe = dataframe.dropna(
@@ -444,10 +532,9 @@ def load_long_df_from_db(index_name):
 
 def upsert_long_df_to_db(dataframe, index_name):
     """
-    날짜·항목·지수별로 데이터를 누적 저장한다.
+    날짜·항목·지수별 데이터를 누적 저장한다.
 
-    동일 키가 존재하면 값 및 업데이트 시각을 최신 값으로 갱신한다.
-    즉, 과거 데이터는 유지하고 신규 날짜만 추가된다.
+    동일 키가 이미 있으면 최근 수집된 값으로 업데이트한다.
     """
     index_name = normalize_index_name(index_name)
 
@@ -457,31 +544,36 @@ def upsert_long_df_to_db(dataframe, index_name):
     connection = get_db_conn()
     cursor = connection.cursor()
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
     processed_rows = 0
 
     try:
         for _, row in dataframe.iterrows():
             date_value = pd.to_datetime(
-                row["DATE"],
+                row.get("DATE"),
+                errors="coerce",
+            )
+
+            region = normalize_region_name(
+                row.get("REGION")
+            )
+
+            numeric_value = pd.to_numeric(
+                row.get("VALUE"),
                 errors="coerce",
             )
 
             if pd.isna(date_value):
                 continue
 
-            region = str(row["REGION"]).strip()
-
             if not is_valid_region_for_index(
                 region,
                 index_name,
             ):
                 continue
-
-            numeric_value = pd.to_numeric(
-                row["VALUE"],
-                errors="coerce",
-            )
 
             if pd.isna(numeric_value):
                 continue
@@ -500,6 +592,7 @@ def upsert_long_df_to_db(dataframe, index_name):
                 ON CONFLICT(dt, region, index_name)
                 DO UPDATE SET
                     value = excluded.value,
+                    source_file = excluded.source_file,
                     created_at = excluded.created_at
                 """,
                 (
@@ -516,16 +609,16 @@ def upsert_long_df_to_db(dataframe, index_name):
 
         connection.commit()
 
-        total_rows = get_total_row_count(index_name)
-
-        return processed_rows, total_rows
-
     except Exception:
         connection.rollback()
         raise
 
     finally:
         connection.close()
+
+    total_rows = get_total_row_count(index_name)
+
+    return processed_rows, total_rows
 
 def save_crawl_audit(
     index_name,
@@ -557,9 +650,9 @@ def save_crawl_audit(
                 started_at,
                 finished_at,
                 status,
-                message,
-                rows_added,
-                total_rows,
+                str(message)[:1000],
+                int(rows_added or 0),
+                int(total_rows or 0),
                 normalize_index_name(index_name),
             ),
         )
@@ -570,6 +663,7 @@ def save_crawl_audit(
         connection.close()
 
 def get_last_sync_meta(index_name):
+    """대시보드 표시용 최근 동기화 정보를 조회한다."""
     index_name = normalize_index_name(index_name)
 
     connection = get_db_conn()
@@ -625,21 +719,28 @@ def get_driver(driver_path="", headless=True):
     if headless:
         options.add_argument("--headless=new")
 
+    chrome_binary = os.getenv("CHROME_BINARY", "").strip()
+
+    if chrome_binary:
+        options.binary_location = chrome_binary
+
     if driver_path:
         return webdriver.Chrome(
             service=Service(driver_path),
             options=options,
         )
 
-    # GitHub Actions ubuntu-latest는 Chrome이 설치되어 있으므로
-    # 기본 Selenium Manager가 보통 자동 처리한다.
     try:
         return webdriver.Chrome(options=options)
-    except Exception as first_error:
+
+    except WebDriverException as first_error:
         if not HAS_WEBDRIVER_MANAGER:
             raise first_error
 
-        log("[DRIVER] Selenium 기본 드라이버 실행 실패. webdriver-manager 시도")
+        log(
+            "[DRIVER] Selenium Manager 실행 실패. "
+            "webdriver-manager를 사용합니다."
+        )
 
         installed_driver = ChromeDriverManager().install()
 
@@ -648,8 +749,12 @@ def get_driver(driver_path="", headless=True):
             options=options,
         )
 
-def handle_login_alerts(driver, timeout=1.0, max_alerts=3):
-    """로그인 직후 발생할 수 있는 Alert를 처리한다."""
+def handle_login_alerts(
+    driver,
+    timeout=1.0,
+    max_alerts=3,
+):
+    """로그인 직후 표시될 수 있는 Alert를 처리한다."""
     for _ in range(max_alerts):
         try:
             WebDriverWait(driver, timeout).until(
@@ -677,7 +782,7 @@ def login(driver, user_id, password):
 
     driver.get(BASE_URL)
 
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 25)
 
     wait.until(
         EC.element_to_be_clickable(
@@ -704,12 +809,25 @@ def login(driver, user_id, password):
     password_input.send_keys(password)
 
     driver.execute_script(
-        "loginSubmitForm(document.form1);"
+        """
+        if (typeof loginSubmitForm === 'function') {
+            loginSubmitForm(document.form1);
+            return;
+        }
+
+        const form = document.querySelector('form');
+        if (form) {
+            form.submit();
+            return;
+        }
+
+        throw new Error('로그인 제출 함수를 찾지 못했습니다.');
+        """
     )
 
     handle_login_alerts(driver)
 
-    time.sleep(1)
+    time.sleep(1.2)
 
     log("[LOGIN] KSG 로그인 완료")
 
@@ -717,15 +835,13 @@ def go_to_index_page(driver, index_name):
     """SCFI 또는 BDI 메뉴로 이동한다."""
     index_name = normalize_index_name(index_name)
 
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 25)
 
     wait.until(
         EC.element_to_be_clickable(
             (By.LINK_TEXT, index_name)
         )
     ).click()
-
-    time.sleep(1)
 
     try:
         wait.until(
@@ -736,11 +852,13 @@ def go_to_index_page(driver, index_name):
     except TimeoutException:
         pass
 
+    time.sleep(0.8)
+
     log(f"[CRAWL] {index_name} 페이지 진입 완료")
 
 def parse_current_table(driver, index_name):
     """
-    현재 페이지의 주요 테이블을 JavaScript로 추출한다.
+    현재 페이지의 후보 테이블을 점수화하여 가장 적합한 테이블을 추출한다.
     """
     index_name = normalize_index_name(index_name)
 
@@ -748,61 +866,59 @@ def parse_current_table(driver, index_name):
     const indexName = "{index_name}";
     const tables = Array.from(document.querySelectorAll("table"));
 
+    function scoreTable(table) {{
+        const text = (table.innerText || "").toUpperCase();
+        const headers = Array.from(
+            table.querySelectorAll("thead th, thead td")
+        ).map(cell => (cell.innerText || "").trim().toUpperCase());
+
+        const rowCount = table.querySelectorAll("tbody tr").length;
+
+        let score = 0;
+
+        if (rowCount > 0) score += 10;
+        if (rowCount >= 5) score += 10;
+        if (text.includes(indexName)) score += 30;
+        if (text.includes("일자") || text.includes("DATE")) score += 20;
+
+        if (indexName === "BDI") {{
+            if (text.includes("BDI")) score += 10;
+            if (text.includes("BCI")) score += 5;
+            if (text.includes("BPI")) score += 5;
+        }}
+
+        if (headers.length >= 2) score += 5;
+
+        return score;
+    }}
+
     let target = null;
+    let bestScore = -1;
 
     for (const table of tables) {{
-        const caption = (
-            table.querySelector("caption")?.innerText || ""
-        ).toUpperCase();
+        const score = scoreTable(table);
 
-        const text = (
-            table.innerText || ""
-        ).toUpperCase();
-
-        const hasRows = table.querySelector("tbody tr");
-
-        if (
-            hasRows
-            && (
-                caption.includes(indexName)
-                || text.includes(indexName)
-                || text.includes("일자")
-            )
-        ) {{
+        if (score > bestScore) {{
+            bestScore = score;
             target = table;
-            break;
         }}
     }}
 
-    if (!target) {{
-        let maxRows = 0;
-
-        for (const table of tables) {{
-            const rowCount =
-                table.querySelectorAll("tbody tr").length;
-
-            if (rowCount > maxRows) {{
-                maxRows = rowCount;
-                target = table;
-            }}
-        }}
+    if (!target || bestScore < 10) {{
+        return {{
+            headerRows: [],
+            rows: [],
+            score: bestScore
+        }};
     }}
 
-    if (!target) {{
-        return {{headers: [], rows: []}};
-    }}
-
-    const headerRows =
-        Array.from(target.querySelectorAll("thead tr"));
-
-    let headers = [];
-
-    if (headerRows.length > 0) {{
-        headers = Array.from(
-            headerRows[headerRows.length - 1]
-                .querySelectorAll("th, td")
+    const headerRows = Array.from(
+        target.querySelectorAll("thead tr")
+    ).map(row => {{
+        return Array.from(
+            row.querySelectorAll("th, td")
         ).map(cell => (cell.innerText || "").trim());
-    }}
+    }});
 
     const rows = Array.from(
         target.querySelectorAll("tbody tr")
@@ -813,14 +929,15 @@ def parse_current_table(driver, index_name):
     }}).filter(row => row.length > 0);
 
     return {{
-        headers: headers,
-        rows: rows
+        headerRows: headerRows,
+        rows: rows,
+        score: bestScore
     }};
     """
 
     result = driver.execute_script(script)
 
-    headers = result.get("headers", [])
+    header_rows = result.get("headerRows", [])
     rows = result.get("rows", [])
 
     if not rows:
@@ -828,55 +945,75 @@ def parse_current_table(driver, index_name):
 
     max_length = max(len(row) for row in rows)
 
-    if len(headers) < max_length:
-        headers.extend(
-            [
-                f"COL_{index}"
-                for index in range(
-                    len(headers) + 1,
-                    max_length + 1,
-                )
-            ]
-        )
+    headers = []
+
+    for column_index in range(max_length):
+        header_value = ""
+
+        for header_row in reversed(header_rows):
+            if column_index >= len(header_row):
+                continue
+
+            candidate = normalize_region_name(
+                header_row[column_index]
+            )
+
+            if candidate:
+                header_value = candidate
+                break
+
+        if not header_value:
+            header_value = f"COL_{column_index + 1}"
+
+        headers.append(header_value)
 
     normalized_rows = []
 
     for row in rows:
-        row = list(row) + [""] * (
-            len(headers) - len(row)
+        padded_row = list(row) + [""] * (
+            max_length - len(row)
         )
 
         output = {}
 
-        for index, value in enumerate(row):
-            column_name = (
-                headers[index]
-                if index < len(headers) and headers[index]
-                else f"COL_{index + 1}"
-            )
+        for column_index, raw_value in enumerate(
+            padded_row
+        ):
+            column_name = headers[column_index]
 
-            if index == 0:
-                output[column_name] = parse_date(value)
+            if column_index == 0:
+                output[column_name] = parse_date(raw_value)
             else:
-                output[column_name] = clean_number(value)
+                output[column_name] = clean_number(raw_value)
 
         normalized_rows.append(output)
 
     dataframe = pd.DataFrame(normalized_rows)
 
-    return dataframe
+    if dataframe.empty:
+        return dataframe
+
+    first_column = dataframe.columns[0]
+
+    dataframe = dataframe.dropna(
+        subset=[first_column]
+    )
+
+    return dataframe.reset_index(drop=True)
 
 def get_table_signature(driver):
     """페이지 변경 여부 확인을 위한 첫 행 시그니처."""
     script = """
-    const table = Array.from(
+    const tables = Array.from(
         document.querySelectorAll("table")
-    ).sort((a, b) => {
+    );
+
+    if (!tables.length) return "";
+
+    const table = tables.sort((a, b) => {
         return b.querySelectorAll("tbody tr").length
             - a.querySelectorAll("tbody tr").length;
     })[0];
-
-    if (!table) return "";
 
     const firstRow = table.querySelector("tbody tr");
 
@@ -884,13 +1021,15 @@ def get_table_signature(driver):
 
     return Array.from(
         firstRow.querySelectorAll("th, td")
-    ).slice(0, 4).map(
+    ).slice(0, 6).map(
         cell => (cell.innerText || "").trim()
     ).join("|");
     """
 
     try:
-        return str(driver.execute_script(script) or "").strip()
+        return str(
+            driver.execute_script(script) or ""
+        ).strip()
     except Exception:
         return ""
 
@@ -900,7 +1039,7 @@ def click_next_page(driver):
     const selectors = [
         ".paginate strong",
         ".paging strong",
-        ".pagination .active a",
+        ".pagination .active",
         ".pagination strong"
     ];
 
@@ -945,7 +1084,7 @@ def click_next_page(driver):
         (By.CSS_SELECTOR, ".paginate a.next"),
         (By.CSS_SELECTOR, ".paging a.next"),
         (By.LINK_TEXT, "다음"),
-        (By.XPATH, "//a[contains(text(), '다음')]"),
+        (By.XPATH, "//a[contains(normalize-space(), '다음')]"),
     ]
 
     for by, selector in selectors:
@@ -954,6 +1093,13 @@ def click_next_page(driver):
 
             for element in elements:
                 if not element.is_displayed():
+                    continue
+
+                classes = (
+                    element.get_attribute("class") or ""
+                ).lower()
+
+                if "disabled" in classes:
                     continue
 
                 driver.execute_script(
@@ -977,11 +1123,15 @@ def click_next_page(driver):
 
     return False
 
-def wait_for_table_change(driver, previous_signature, timeout=10):
+def wait_for_table_change(
+    driver,
+    previous_signature,
+    timeout=12,
+):
     """다음 페이지의 테이블 렌더링까지 대기한다."""
-    start = time.time()
+    start_time = time.time()
 
-    while time.time() - start < timeout:
+    while time.time() - start_time < timeout:
         signature = get_table_signature(driver)
 
         if signature and signature != previous_signature:
@@ -995,15 +1145,17 @@ def melt_to_long(dataframe, index_name):
     """크롤링된 Wide 테이블을 DB 저장용 Long Format으로 변환한다."""
     index_name = normalize_index_name(index_name)
 
+    empty_dataframe = pd.DataFrame(
+        columns=[
+            "DATE",
+            "REGION",
+            "VALUE",
+            "INDEX_NAME",
+        ]
+    )
+
     if dataframe is None or dataframe.empty:
-        return pd.DataFrame(
-            columns=[
-                "DATE",
-                "REGION",
-                "VALUE",
-                "INDEX_NAME",
-            ]
-        )
+        return empty_dataframe
 
     working = dataframe.copy()
 
@@ -1015,6 +1167,9 @@ def melt_to_long(dataframe, index_name):
     )
 
     working = working.dropna(subset=[date_column])
+
+    if working.empty:
+        return empty_dataframe
 
     value_columns = [
         column
@@ -1040,14 +1195,7 @@ def melt_to_long(dataframe, index_name):
             numeric_columns.append(column)
 
     if not numeric_columns:
-        return pd.DataFrame(
-            columns=[
-                "DATE",
-                "REGION",
-                "VALUE",
-                "INDEX_NAME",
-            ]
-        )
+        return empty_dataframe
 
     melted = working.melt(
         id_vars=[date_column],
@@ -1060,9 +1208,18 @@ def melt_to_long(dataframe, index_name):
         columns={date_column: "DATE"}
     )
 
-    melted = melted.dropna(subset=["VALUE"])
+    melted["REGION"] = melted["REGION"].apply(
+        normalize_region_name
+    )
 
-    melted["INDEX_NAME"] = index_name
+    melted["VALUE"] = pd.to_numeric(
+        melted["VALUE"],
+        errors="coerce",
+    )
+
+    melted = melted.dropna(
+        subset=["DATE", "REGION", "VALUE"]
+    )
 
     melted = melted[
         melted["REGION"].apply(
@@ -1072,6 +1229,8 @@ def melt_to_long(dataframe, index_name):
             )
         )
     ]
+
+    melted["INDEX_NAME"] = index_name
 
     return melted[
         [
@@ -1091,7 +1250,12 @@ def crawl_incremental(
 ):
     """
     최신 페이지부터 순차 탐색한다.
-    DB 최종 날짜보다 같거나 과거 날짜가 발견되면 중단한다.
+
+    stop_date가 존재하면 해당 날짜보다 같거나 과거인 행이
+    나타나는 시점에서 종료한다.
+
+    단, 최신 데이터 수정 가능성에 대응하기 위해
+    DB 최신일 - OVERLAP_DAYS 이후 데이터를 재수집한다.
     """
     index_name = normalize_index_name(index_name)
 
@@ -1099,7 +1263,10 @@ def crawl_incremental(
     seen_signatures = set()
 
     for page_number in range(1, max_pages + 1):
-        dataframe = parse_current_table(driver, index_name)
+        dataframe = parse_current_table(
+            driver,
+            index_name,
+        )
 
         if dataframe.empty:
             log(
@@ -1115,23 +1282,35 @@ def crawl_incremental(
             errors="coerce",
         ).dt.date
 
+        dataframe = dataframe[
+            parsed_dates.notna()
+        ].copy()
+
+        parsed_dates = pd.to_datetime(
+            dataframe[date_column],
+            errors="coerce",
+        ).dt.date
+
+        if dataframe.empty:
+            log(
+                f"[CRAWL] {index_name} "
+                f"{page_number}페이지 날짜 데이터 없음"
+            )
+            break
+
         if stop_date is not None:
-            new_rows = dataframe[
+            recent_rows = dataframe[
                 parsed_dates > stop_date
             ].copy()
 
-            old_or_same_rows = dataframe[
-                parsed_dates <= stop_date
-            ]
+            if not recent_rows.empty:
+                frames.append(recent_rows)
 
-            if not new_rows.empty:
-                frames.append(new_rows)
-
-            if not old_or_same_rows.empty:
+            if (parsed_dates <= stop_date).any():
                 log(
                     f"[CRAWL] {index_name} "
                     f"{page_number}페이지에서 "
-                    f"DB 기준일 {stop_date} 도달"
+                    f"중단 기준일 {stop_date} 도달"
                 )
                 break
         else:
@@ -1155,8 +1334,14 @@ def crawl_incremental(
             log("[CRAWL] 다음 페이지 없음")
             break
 
-        if not wait_for_table_change(driver, signature):
-            log("[CRAWL] 다음 페이지 테이블 갱신 시간 초과")
+        if not wait_for_table_change(
+            driver,
+            signature,
+        ):
+            log(
+                "[CRAWL] 다음 페이지 테이블 "
+                "갱신 시간 초과"
+            )
             break
 
         time.sleep(pause)
@@ -1188,14 +1373,21 @@ def run_incremental_sync(
         driver = None
 
         try:
-            stop_date = get_latest_date(index_name)
+            latest_date = get_latest_date(index_name)
 
-            if stop_date:
+            if latest_date:
+                stop_date = latest_date - timedelta(
+                    days=OVERLAP_DAYS
+                )
+
                 log(
                     f"[DB] {index_name} "
-                    f"기준 최종일: {stop_date}"
+                    f"최신 DB 일자: {latest_date} / "
+                    f"재수집 기준일: {stop_date}"
                 )
             else:
+                stop_date = None
+
                 log(
                     f"[DB] {index_name} "
                     "기존 데이터 없음 - 전체 수집 시작"
@@ -1269,24 +1461,31 @@ def run_incremental_sync(
 
             total_rows = get_total_row_count(index_name)
 
-            save_crawl_audit(
-                index_name=index_name,
-                started_at=started_at,
-                finished_at=finished_at,
-                status="ERROR",
-                message=str(error)[:1000],
-                rows_added=0,
-                total_rows=total_rows,
-            )
+            try:
+                save_crawl_audit(
+                    index_name=index_name,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    status="ERROR",
+                    message=str(error),
+                    rows_added=0,
+                    total_rows=total_rows,
+                )
+            except Exception as audit_error:
+                logger.error(
+                    f"[ERROR] 실패 이력 저장 실패: "
+                    f"{audit_error}"
+                )
 
             return {
                 "ok": False,
                 "index_name": index_name,
                 "error": str(error),
+                "total_rows": total_rows,
             }
 
         finally:
-            if driver:
+            if driver is not None:
                 try:
                     driver.quit()
                 except Exception:
@@ -1308,9 +1507,23 @@ def dataframe_to_records(dataframe):
             errors="coerce",
         ).dt.strftime("%Y-%m-%d")
 
-    output = output.where(pd.notnull(output), None)
+    output = output.replace(
+        [float("inf"), float("-inf")],
+        pd.NA,
+    )
 
-    return output.to_dict(orient="records")
+    output = output.where(
+        pd.notnull(output),
+        None,
+    )
+
+    return json.loads(
+        output.to_json(
+            orient="records",
+            force_ascii=False,
+            date_format="iso",
+        )
+    )
 
 def build_static_json():
     """누적 SQLite 데이터를 GitHub Pages용 JSON 파일로 생성한다."""
@@ -1336,16 +1549,17 @@ def build_static_json():
             "records": dataframe_to_records(dataframe),
             "regions": regions,
             "last_sync": get_last_sync_meta(index_name),
-            "total_points": len(dataframe),
+            "total_points": int(len(dataframe)),
         }
 
-    JSON_PATH.write_text(
+    atomic_write_text(
+        JSON_PATH,
         json.dumps(
             payload,
             ensure_ascii=False,
             separators=(",", ":"),
+            allow_nan=False,
         ),
-        encoding="utf-8",
     )
 
     log(f"[STATIC] JSON 생성: {JSON_PATH.name}")
@@ -1359,11 +1573,13 @@ STATIC_HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Shipping Index Dashboard</title>
+
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
 <style>
 :root{
   --bg:#eef3f8;
-  --surface:#fff;
+  --surface:#ffffff;
   --border:#dbe4ee;
   --text:#1f2937;
   --muted:#64748b;
@@ -1528,15 +1744,25 @@ th{background:#f1f5f9;color:#334155}
 }
 </style>
 </head>
+
 <body>
 <div class="page-wrap">
   <div class="layout">
+
     <aside class="sidebar">
       <div class="sidebar-section">
         <div class="sidebar-label">Index</div>
         <div class="index-tabs">
-          <button id="tabSCFI" class="index-tab active" onclick="changeIndex('SCFI')">SCFI</button>
-          <button id="tabBDI" class="index-tab" onclick="changeIndex('BDI')">BDI</button>
+          <button id="tabSCFI"
+                  class="index-tab active"
+                  onclick="changeIndex('SCFI')">
+            SCFI
+          </button>
+          <button id="tabBDI"
+                  class="index-tab"
+                  onclick="changeIndex('BDI')">
+            BDI
+          </button>
         </div>
       </div>
 
@@ -1544,17 +1770,21 @@ th{background:#f1f5f9;color:#334155}
         <div class="sidebar-label">Date Range</div>
 
         <div class="field-block">
-          <label class="field-label">시작일</label>
-          <input id="startDate" type="date" onchange="renderDashboard()">
+          <label class="field-label" for="startDate">시작일</label>
+          <input id="startDate"
+                 type="date"
+                 onchange="renderDashboard()">
         </div>
 
         <div class="field-block">
-          <label class="field-label">종료일</label>
-          <input id="endDate" type="date" onchange="renderDashboard()">
+          <label class="field-label" for="endDate">종료일</label>
+          <input id="endDate"
+                 type="date"
+                 onchange="renderDashboard()">
         </div>
 
         <div class="field-block">
-          <label class="field-label">연도 범위</label>
+          <label class="field-label" for="yearRange">연도 범위</label>
           <select id="yearRange" onchange="renderDashboard()">
             <option value="0">전체 기간</option>
             <option value="1">최근 1년</option>
@@ -1567,13 +1797,24 @@ th{background:#f1f5f9;color:#334155}
 
       <div class="sidebar-section">
         <div class="sidebar-label">Routes</div>
+
         <div class="field-block">
-          <label class="field-label">항목 복수 선택</label>
-          <select id="regionSelect" multiple onchange="renderDashboard()"></select>
+          <label class="field-label" for="regionSelect">
+            항목 복수 선택
+          </label>
+          <select id="regionSelect"
+                  multiple
+                  onchange="onRegionChange()">
+          </select>
         </div>
+
         <div class="actions">
-          <button class="btn primary" onclick="selectAllRegions()">전체 선택</button>
-          <button class="btn" onclick="clearRegions()">선택 해제</button>
+          <button class="btn primary" onclick="selectAllRegions()">
+            전체 선택
+          </button>
+          <button class="btn" onclick="clearRegions()">
+            선택 해제
+          </button>
         </div>
       </div>
 
@@ -1581,13 +1822,19 @@ th{background:#f1f5f9;color:#334155}
         <div class="sidebar-label">Chart Style</div>
 
         <div class="field-block">
-          <label class="field-label">선 두께</label>
-          <input id="lineWidth" type="number" min="0.5" max="10" step="0.5" value="2.5" onchange="renderDashboard()">
+          <label class="field-label" for="lineWidth">선 두께</label>
+          <input id="lineWidth"
+                 type="number"
+                 min="0.5"
+                 max="10"
+                 step="0.5"
+                 value="2.5"
+                 onchange="renderDashboard()">
         </div>
 
         <div class="field-block">
-          <label class="field-label">색상 테마</label>
-          <select id="palette" onchange="renderDashboard()">
+          <label class="field-label" for="palette">색상 테마</label>
+          <select id="palette" onchange="resetPaletteAndRender()">
             <option value="Auto">Auto</option>
             <option value="Grey">Grey</option>
             <option value="Red">Red</option>
@@ -1605,36 +1852,51 @@ th{background:#f1f5f9;color:#334155}
     <main>
       <div class="main-header">
         <h1 class="main-title">Shipping Index Dashboard</h1>
+
         <div class="meta">
           <strong>Source:</strong>
-          <a href="https://www.ksg.co.kr/" target="_blank" rel="noopener noreferrer">Korea Shipping Gazette</a>
+          <a href="https://www.ksg.co.kr/"
+             target="_blank"
+             rel="noopener noreferrer">
+            Korea Shipping Gazette
+          </a>
           &nbsp;|&nbsp;
-          <strong>Current Index:</strong> <span id="currentIndex">SCFI</span>
+          <strong>Current Index:</strong>
+          <span id="currentIndex">SCFI</span>
           &nbsp;|&nbsp;
-          <strong>Last sync:</strong> <span id="lastSync">-</span>
+          <strong>Last sync:</strong>
+          <span id="lastSync">-</span>
           &nbsp;|&nbsp;
-          <strong>GitHub Actions generated:</strong> <span id="generatedAt">-</span>
+          <strong>GitHub Actions generated:</strong>
+          <span id="generatedAt">-</span>
         </div>
       </div>
 
-      <div id="loading" class="card loading">데이터를 불러오는 중입니다.</div>
+      <div id="loading" class="card loading">
+        데이터를 불러오는 중입니다.
+      </div>
 
       <div id="dashboard" style="display:none;">
+
         <div class="card">
           <div class="section-title">Current Highlights</div>
+
           <div class="metrics-grid">
             <div class="metric">
               <div class="metric-label">조회 시작일</div>
               <div id="shownStart" class="metric-value">-</div>
             </div>
+
             <div class="metric">
               <div class="metric-label">조회 종료일</div>
               <div id="shownEnd" class="metric-value">-</div>
             </div>
+
             <div class="metric">
               <div class="metric-label">선택 항목 수</div>
               <div id="regionCount" class="metric-value">-</div>
             </div>
+
             <div class="metric">
               <div class="metric-label">표시 데이터 수</div>
               <div id="shownRows" class="metric-value">-</div>
@@ -1645,28 +1907,46 @@ th{background:#f1f5f9;color:#334155}
         <div class="card">
           <div class="toolbar">
             <div>
-              <div class="section-title" style="margin-bottom:4px;">항목별 비교 차트</div>
-              <div class="meta">선택한 복수 항목을 한 화면에서 비교합니다.</div>
+              <div class="section-title" style="margin-bottom:4px;">
+                항목별 비교 차트
+              </div>
+              <div class="meta">
+                선택한 복수 항목을 한 화면에서 비교합니다.
+              </div>
             </div>
+
             <div class="actions">
-              <button class="btn primary" onclick="downloadCsv()">CSV 다운로드</button>
-              <button class="btn" onclick="downloadChartHtml()">차트 HTML</button>
-              <button class="btn" onclick="downloadChartPng()">PNG</button>
+              <button class="btn primary" onclick="downloadCsv()">
+                CSV 다운로드
+              </button>
+              <button class="btn" onclick="downloadChartHtml()">
+                차트 HTML
+              </button>
+              <button class="btn" onclick="downloadChartPng()">
+                PNG
+              </button>
             </div>
           </div>
+
           <div id="chart" class="chart"></div>
         </div>
 
         <div class="card">
           <div class="toolbar">
-            <div class="section-title" style="margin:0;">항목별 최고점 / 최저점 / 스프레드</div>
-            <select id="sortMode" style="width:190px;" onchange="renderHighlights()">
+            <div class="section-title" style="margin:0;">
+              항목별 최고점 / 최저점 / 스프레드
+            </div>
+
+            <select id="sortMode"
+                    style="width:190px;"
+                    onchange="renderHighlights()">
               <option value="region">항목명</option>
               <option value="peak_desc">최고값 내림차순</option>
               <option value="trough_asc">최저값 오름차순</option>
               <option value="spread_desc">스프레드 내림차순</option>
             </select>
           </div>
+
           <div id="highlightTable" class="table-wrap"></div>
         </div>
       </div>
@@ -1679,6 +1959,7 @@ let dashboardData = null;
 let selectedIndex = "SCFI";
 let filteredRecords = [];
 let currentRegions = [];
+let regionColors = {};
 
 const BDI_LABEL_MAP = {
   "BDI":"BDI (Baltic Exchange Dry Index)",
@@ -1698,34 +1979,57 @@ function regionLabel(region) {
 
 function getPalette(name) {
   const palettes = {
-    Auto:["#e53935","#fb8c00","#fdd835","#43a047","#00acc1","#1e88e5","#3949ab","#8e24aa","#d81b60","#6d4c41","#00897b","#7cb342"],
+    Auto:[
+      "#e53935","#fb8c00","#fdd835","#43a047",
+      "#00acc1","#1e88e5","#3949ab","#8e24aa",
+      "#d81b60","#6d4c41","#00897b","#7cb342"
+    ],
     Grey:["#111827","#374151","#6b7280","#9ca3af","#d1d5db"],
-    Red:["#7f1d1d","#b91c1c","#dc2626","#ef4444","#f87171","#ec4899","#f97316"],
-    Blue:["#0f172a","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#0ea5e9","#38bdf8"]
+    Red:["#7f1d1d","#b91c1c","#dc2626","#ef4444","#f87171","#ec4899"],
+    Blue:["#0f172a","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#0ea5e9"]
   };
+
   return palettes[name] || palettes.Auto;
 }
 
 function selectedRegions() {
-  return Array.from(
-    document.getElementById("regionSelect").selectedOptions
-  ).map(option => option.value);
+  const select = document.getElementById("regionSelect");
+
+  return Array.from(select.selectedOptions).map(
+    option => option.value
+  );
 }
 
 function selectAllRegions() {
   Array.from(document.getElementById("regionSelect").options)
     .forEach(option => option.selected = true);
+
+  renderColorPanel();
   renderDashboard();
 }
 
 function clearRegions() {
   Array.from(document.getElementById("regionSelect").options)
     .forEach(option => option.selected = false);
+
+  renderColorPanel();
+  renderDashboard();
+}
+
+function onRegionChange() {
+  renderColorPanel();
+  renderDashboard();
+}
+
+function resetPaletteAndRender() {
+  regionColors = {};
+  renderColorPanel();
   renderDashboard();
 }
 
 function changeIndex(indexName) {
   selectedIndex = indexName;
+  regionColors = {};
 
   document.getElementById("tabSCFI").classList.toggle(
     "active",
@@ -1737,21 +2041,27 @@ function changeIndex(indexName) {
     indexName === "BDI"
   );
 
-  document.getElementById("currentIndex").innerText = indexName;
+  document.getElementById("currentIndex").textContent =
+    indexName;
 
   populateRegions(true);
+  setDateBounds();
   renderDashboard();
 }
 
 function populateRegions(selectAll) {
   const select = document.getElementById("regionSelect");
-  const data = dashboardData.indexes[selectedIndex] || {};
-  const regions = data.regions || [];
+  const indexData = dashboardData.indexes[selectedIndex] || {};
+  const regions = indexData.regions || [];
 
   select.innerHTML = "";
 
   regions.forEach(region => {
-    const option = new Option(regionLabel(region), region);
+    const option = new Option(
+      regionLabel(region),
+      region
+    );
+
     option.selected = selectAll;
     select.add(option);
   });
@@ -1762,22 +2072,32 @@ function populateRegions(selectAll) {
 function renderColorPanel() {
   const panel = document.getElementById("colorPanel");
   const regions = selectedRegions();
-  const colors = getPalette(document.getElementById("palette").value);
+  const colors = getPalette(
+    document.getElementById("palette").value
+  );
 
   panel.innerHTML = "";
 
   regions.forEach((region, index) => {
+    if (!regionColors[region]) {
+      regionColors[region] =
+        colors[index % colors.length];
+    }
+
     const wrapper = document.createElement("div");
     wrapper.className = "color-row";
 
     const label = document.createElement("label");
-    label.innerText = regionLabel(region);
+    label.textContent = regionLabel(region);
 
     const color = document.createElement("input");
     color.type = "color";
-    color.id = "color_" + region.replace(/[^a-zA-Z0-9가-힣_]/g, "_");
-    color.value = colors[index % colors.length];
-    color.addEventListener("change", renderDashboard);
+    color.value = regionColors[region];
+
+    color.addEventListener("change", event => {
+      regionColors[region] = event.target.value;
+      renderDashboard();
+    });
 
     wrapper.appendChild(label);
     wrapper.appendChild(color);
@@ -1786,13 +2106,44 @@ function renderColorPanel() {
 }
 
 function getColor(region, index) {
-  const id = "color_" + region.replace(/[^a-zA-Z0-9가-힣_]/g, "_");
-  const input = document.getElementById(id);
+  if (regionColors[region]) {
+    return regionColors[region];
+  }
 
-  if (input) return input.value;
+  const colors = getPalette(
+    document.getElementById("palette").value
+  );
 
-  const colors = getPalette(document.getElementById("palette").value);
   return colors[index % colors.length];
+}
+
+function setDateBounds() {
+  const indexData = dashboardData.indexes[selectedIndex] || {};
+  const records = indexData.records || [];
+
+  if (!records.length) {
+    return;
+  }
+
+  const dates = records
+    .map(record => record.DATE)
+    .filter(Boolean)
+    .sort();
+
+  if (!dates.length) {
+    return;
+  }
+
+  const start = document.getElementById("startDate");
+  const end = document.getElementById("endDate");
+
+  start.min = dates[0];
+  start.max = dates[dates.length - 1];
+  end.min = dates[0];
+  end.max = dates[dates.length - 1];
+
+  start.value = dates[0];
+  end.value = dates[dates.length - 1];
 }
 
 function currentRecords() {
@@ -1802,20 +2153,32 @@ function currentRecords() {
 
   const startDate = document.getElementById("startDate").value;
   const endDate = document.getElementById("endDate").value;
-  const rangeYears = Number(document.getElementById("yearRange").value);
 
-  let output = records.filter(record => regions.includes(record.REGION));
+  const rangeYears = Number(
+    document.getElementById("yearRange").value
+  );
+
+  let output = records.filter(record => {
+    return regions.includes(record.REGION);
+  });
 
   if (startDate) {
-    output = output.filter(record => record.DATE >= startDate);
+    output = output.filter(
+      record => record.DATE >= startDate
+    );
   }
 
   if (endDate) {
-    output = output.filter(record => record.DATE <= endDate);
+    output = output.filter(
+      record => record.DATE <= endDate
+    );
   }
 
   if (rangeYears > 0 && output.length > 0) {
-    const maxYear = Math.max(...output.map(record => Number(record.YEAR)));
+    const maxYear = Math.max(
+      ...output.map(record => Number(record.YEAR))
+    );
+
     const minYear = maxYear - rangeYears + 1;
 
     output = output.filter(
@@ -1825,16 +2188,21 @@ function currentRecords() {
 
   return output.sort((a, b) => {
     if (a.DATE === b.DATE) {
-      return String(a.REGION).localeCompare(String(b.REGION));
+      return String(a.REGION).localeCompare(
+        String(b.REGION)
+      );
     }
-    return String(a.DATE).localeCompare(String(b.DATE));
+
+    return String(a.DATE).localeCompare(
+      String(b.DATE)
+    );
   });
 }
 
 function renderDashboard() {
-  if (!dashboardData) return;
-
-  renderColorPanel();
+  if (!dashboardData) {
+    return;
+  }
 
   filteredRecords = currentRecords();
   currentRegions = selectedRegions();
@@ -1842,19 +2210,21 @@ function renderDashboard() {
   const indexData = dashboardData.indexes[selectedIndex] || {};
   const sync = indexData.last_sync || {};
 
-  document.getElementById("lastSync").innerText =
+  document.getElementById("lastSync").textContent =
     sync.finished_at || "-";
 
-  document.getElementById("regionCount").innerText =
+  document.getElementById("regionCount").textContent =
     currentRegions.length.toLocaleString();
 
-  document.getElementById("shownRows").innerText =
+  document.getElementById("shownRows").textContent =
     filteredRecords.length.toLocaleString();
 
-  document.getElementById("shownStart").innerText =
-    filteredRecords.length ? filteredRecords[0].DATE : "-";
+  document.getElementById("shownStart").textContent =
+    filteredRecords.length
+      ? filteredRecords[0].DATE
+      : "-";
 
-  document.getElementById("shownEnd").innerText =
+  document.getElementById("shownEnd").textContent =
     filteredRecords.length
       ? filteredRecords[filteredRecords.length - 1].DATE
       : "-";
@@ -1864,33 +2234,47 @@ function renderDashboard() {
 }
 
 function renderChart() {
+  const chart = document.getElementById("chart");
+
   if (!filteredRecords.length) {
-    document.getElementById("chart").innerHTML =
-      "<div class='empty'>선택 조건에 해당하는 데이터가 없습니다.</div>";
+    chart.innerHTML = "";
+
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent =
+      "선택 조건에 해당하는 데이터가 없습니다.";
+
+    chart.appendChild(empty);
     return;
   }
 
-  const width = Number(document.getElementById("lineWidth").value) || 2.5;
+  const width = Number(
+    document.getElementById("lineWidth").value
+  ) || 2.5;
 
-  const traces = currentRegions.map((region, index) => {
-    const rows = filteredRecords.filter(
-      record => record.REGION === region
-    );
+  const traces = currentRegions.map(
+    (region, index) => {
+      const rows = filteredRecords.filter(
+        record => record.REGION === region
+      );
 
-    return {
-      x: rows.map(row => row.DATE),
-      y: rows.map(row => Number(row.VALUE)),
-      type: "scatter",
-      mode: "lines",
-      name: regionLabel(region),
-      line: {
-        width: width,
-        color: getColor(region, index)
-      },
-      hovertemplate:
-        "날짜=%{x}<br>항목=%{fullData.name}<br>지수=%{y:,.2f}<extra></extra>"
-    };
-  });
+      return {
+        x: rows.map(row => row.DATE),
+        y: rows.map(row => Number(row.VALUE)),
+        type: "scatter",
+        mode: "lines",
+        name: regionLabel(region),
+        line: {
+          width: width,
+          color: getColor(region, index)
+        },
+        hovertemplate:
+          "날짜=%{x}<br>"
+          + "항목=%{fullData.name}<br>"
+          + "지수=%{y:,.2f}<extra></extra>"
+      };
+    }
+  );
 
   Plotly.react(
     "chart",
@@ -1898,10 +2282,13 @@ function renderChart() {
     {
       template: "plotly_white",
       height: 600,
-      margin: {l: 65, r: 25, t: 45, b: 55},
+      margin: {l:65,r:25,t:45,b:55},
       hovermode: "x unified",
       xaxis: {title: "Date"},
-      yaxis: {title: "Index", tickformat: ","},
+      yaxis: {
+        title: "Index",
+        tickformat: ","
+      },
       legend: {
         orientation: "h",
         yanchor: "bottom",
@@ -1916,12 +2303,38 @@ function renderChart() {
   );
 }
 
+function numberText(value) {
+  return Number(value).toLocaleString(
+    undefined,
+    {
+      maximumFractionDigits: 2
+    }
+  );
+}
+
+function appendCell(row, value, className = "") {
+  const cell = document.createElement("td");
+
+  if (className) {
+    cell.className = className;
+  }
+
+  cell.textContent = value;
+  row.appendChild(cell);
+}
+
 function renderHighlights() {
-  const container = document.getElementById("highlightTable");
+  const container = document.getElementById(
+    "highlightTable"
+  );
+
+  container.innerHTML = "";
 
   if (!filteredRecords.length) {
-    container.innerHTML =
-      "<div class='empty'>표시할 데이터가 없습니다.</div>";
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "표시할 데이터가 없습니다.";
+    container.appendChild(empty);
     return;
   }
 
@@ -1930,7 +2343,9 @@ function renderHighlights() {
       record => record.REGION === region
     );
 
-    if (!records.length) return null;
+    if (!records.length) {
+      return null;
+    }
 
     const sorted = [...records].sort(
       (a, b) => Number(a.VALUE) - Number(b.VALUE)
@@ -1952,34 +2367,58 @@ function renderHighlights() {
   const mode = document.getElementById("sortMode").value;
 
   rows.sort((a, b) => {
-    if (mode === "peak_desc") return b.peakValue - a.peakValue;
-    if (mode === "trough_asc") return a.troughValue - b.troughValue;
-    if (mode === "spread_desc") return b.spread - a.spread;
+    if (mode === "peak_desc") {
+      return b.peakValue - a.peakValue;
+    }
+
+    if (mode === "trough_asc") {
+      return a.troughValue - b.troughValue;
+    }
+
+    if (mode === "spread_desc") {
+      return b.spread - a.spread;
+    }
+
     return a.region.localeCompare(b.region);
   });
 
-  container.innerHTML =
-    "<table>"
-    + "<thead><tr>"
-    + "<th>항목</th>"
-    + "<th>최고 일자</th>"
-    + "<th>최고 값</th>"
-    + "<th>최저 일자</th>"
-    + "<th>최저 값</th>"
-    + "<th>스프레드</th>"
-    + "</tr></thead>"
-    + "<tbody>"
-    + rows.map(row =>
-      "<tr>"
-      + "<td>" + regionLabel(row.region) + "</td>"
-      + "<td>" + row.peakDate + "</td>"
-      + "<td class='peak'>" + row.peakValue.toLocaleString(undefined,{maximumFractionDigits:2}) + "</td>"
-      + "<td>" + row.troughDate + "</td>"
-      + "<td class='trough'>" + row.troughValue.toLocaleString(undefined,{maximumFractionDigits:2}) + "</td>"
-      + "<td class='spread'>" + row.spread.toLocaleString(undefined,{maximumFractionDigits:2}) + "</td>"
-      + "</tr>"
-    ).join("")
-    + "</tbody></table>";
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+
+  [
+    "항목",
+    "최고 일자",
+    "최고 값",
+    "최저 일자",
+    "최저 값",
+    "스프레드"
+  ].forEach(label => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.appendChild(th);
+  });
+
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+
+  rows.forEach(item => {
+    const row = document.createElement("tr");
+
+    appendCell(row, regionLabel(item.region));
+    appendCell(row, item.peakDate);
+    appendCell(row, numberText(item.peakValue), "peak");
+    appendCell(row, item.troughDate);
+    appendCell(row, numberText(item.troughValue), "trough");
+    appendCell(row, numberText(item.spread), "spread");
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  container.appendChild(table);
 }
 
 function downloadCsv() {
@@ -1988,21 +2427,30 @@ function downloadCsv() {
     return;
   }
 
-  const headers = ["DATE","YEAR","REGION","VALUE","INDEX_NAME"];
+  const headers = [
+    "DATE",
+    "YEAR",
+    "REGION",
+    "VALUE",
+    "INDEX_NAME"
+  ];
 
   const csv = [
     headers.join(","),
-    ...filteredRecords.map(row =>
-      headers.map(key => {
+    ...filteredRecords.map(row => {
+      return headers.map(key => {
         const text = String(row[key] ?? "");
+
         return '"' + text.replaceAll('"', '""') + '"';
-      }).join(",")
-    )
+      }).join(",");
+    })
   ].join("\n");
 
   const blob = new Blob(
     ["\ufeff" + csv],
-    {type: "text/csv;charset=utf-8;"}
+    {
+      type: "text/csv;charset=utf-8;"
+    }
   );
 
   const url = URL.createObjectURL(blob);
@@ -2019,9 +2467,9 @@ function downloadCsv() {
 }
 
 function downloadChartHtml() {
-  const chartElement = document.getElementById("chart");
+  const chart = document.getElementById("chart");
 
-  if (!chartElement.data || !chartElement.layout) {
+  if (!chart.data || !chart.layout) {
     alert("다운로드할 차트가 없습니다.");
     return;
   }
@@ -2036,8 +2484,8 @@ function downloadChartHtml() {
 <body>
 <div id="chart" style="width:100%;height:95vh;"></div>
 <script>
-const data = ${JSON.stringify(chartElement.data)};
-const layout = ${JSON.stringify(chartElement.layout)};
+const data = ${JSON.stringify(chart.data)};
+const layout = ${JSON.stringify(chart.layout)};
 Plotly.newPlot("chart", data, layout, {responsive:true});
 </script>
 </body>
@@ -2045,7 +2493,9 @@ Plotly.newPlot("chart", data, layout, {responsive:true});
 
   const blob = new Blob(
     [html],
-    {type: "text/html;charset=utf-8;"}
+    {
+      type: "text/html;charset=utf-8;"
+    }
   );
 
   const url = URL.createObjectURL(blob);
@@ -2062,9 +2512,14 @@ Plotly.newPlot("chart", data, layout, {responsive:true});
 }
 
 function downloadChartPng() {
-  const chartElement = document.getElementById("chart");
+  const chart = document.getElementById("chart");
 
-  Plotly.downloadImage(chartElement, {
+  if (!chart.data) {
+    alert("다운로드할 차트가 없습니다.");
+    return;
+  }
+
+  Plotly.downloadImage(chart, {
     format: "png",
     width: 1600,
     height: 900,
@@ -2074,30 +2529,47 @@ function downloadChartPng() {
 
 async function initializeDashboard() {
   try {
-    const response = await fetch("./shipping_index_data.json");
+    const response = await fetch(
+      "./shipping_index_data.json",
+      {
+        cache: "no-store"
+      }
+    );
 
     if (!response.ok) {
-      throw new Error("shipping_index_data.json을 읽을 수 없습니다.");
+      throw new Error(
+        "shipping_index_data.json을 읽을 수 없습니다."
+      );
     }
 
     dashboardData = await response.json();
 
-    document.getElementById("generatedAt").innerText =
+    document.getElementById("generatedAt").textContent =
       dashboardData.generated_at || "-";
 
     populateRegions(true);
+    setDateBounds();
 
-    document.getElementById("loading").style.display = "none";
-    document.getElementById("dashboard").style.display = "block";
+    document.getElementById("loading").style.display =
+      "none";
+
+    document.getElementById("dashboard").style.display =
+      "block";
 
     renderDashboard();
 
   } catch (error) {
-    document.getElementById("loading").innerHTML =
-      "<div class='empty'>"
-      + "데이터 로드에 실패했습니다.<br>"
-      + "GitHub Actions 실행 및 배포 파일을 확인하세요."
-      + "</div>";
+    const loading = document.getElementById("loading");
+
+    loading.innerHTML = "";
+
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent =
+      "데이터 로드에 실패했습니다. "
+      + "GitHub Actions 실행 및 배포 파일을 확인하세요.";
+
+    loading.appendChild(empty);
 
     console.error(error);
   }
@@ -2114,9 +2586,9 @@ window.addEventListener(
 
 def generate_static_html():
     """GitHub Pages용 index.html을 생성한다."""
-    HTML_PATH.write_text(
+    atomic_write_text(
+        HTML_PATH,
         STATIC_HTML,
-        encoding="utf-8",
     )
 
     log(f"[STATIC] HTML 생성: {HTML_PATH.name}")
@@ -2124,9 +2596,16 @@ def generate_static_html():
 # =========================================================
 # 8. Execution Modes
 # =========================================================
+def has_any_stored_data():
+    """SCFI 또는 BDI 중 하나라도 기존 DB 데이터가 있는지 확인한다."""
+    return any(
+        get_total_row_count(index_name) > 0
+        for index_name in SUPPORTED_INDEXES
+    )
+
 def run_cron_job(args):
     """
-    GitHub Actions용 실행 모드.
+    GitHub Actions 및 로컬 실행 공통 모드.
 
     SCFI와 BDI를 순차 수집하고,
     누적 DB와 정적 JSON/HTML 파일을 갱신한다.
@@ -2145,41 +2624,42 @@ def run_cron_job(args):
             user_id=args.user,
             password=args.password,
             driver_path=args.driver_path,
-            headless=True,
+            headless=not args.show_browser,
             max_pages=args.max_pages,
         )
 
         results.append(result)
 
-    # 일부 지수 크롤링 실패 시에도 기존 DB 데이터를 기반으로
-    # GitHub Pages 정적 파일은 계속 생성한다.
+    # 일부 지수 수집이 실패해도 기존 DB 데이터로
+    # GitHub Pages 정적 파일을 생성한다.
     build_static_json()
     generate_static_html()
 
-    failed = [
+    failed_results = [
         result
         for result in results
         if not result.get("ok")
     ]
 
-    if failed:
+    if failed_results:
         errors = " | ".join(
-            f"{result['index_name']}: {result.get('error', '')}"
-            for result in failed
+            f"{result['index_name']}: "
+            f"{result.get('error', '')}"
+            for result in failed_results
         )
 
         log(f"[WARN] 일부 지수 수집 실패: {errors}")
 
     log("[CRON] Shipping Index Dashboard 갱신 완료")
+    log("=" * 60)
 
-    # 기존 DB가 있다면 정적 사이트는 유지되므로,
-    # 일부 실패가 있어도 Actions 전체를 실패시키지 않는다.
     return results
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "SCFI / BDI Crawler + GitHub Pages Dashboard"
+            "SCFI / BDI Crawler + "
+            "GitHub Pages Dashboard"
         )
     )
 
@@ -2225,6 +2705,15 @@ def parse_args():
         help="각 지수별 최대 페이지 탐색 수",
     )
 
+    parser.add_argument(
+        "--show-browser",
+        action="store_true",
+        help=(
+            "로컬 디버깅용 Chrome 브라우저 표시. "
+            "기본값은 Headless 실행"
+        ),
+    )
+
     return parser.parse_args()
 
 def main():
@@ -2234,14 +2723,31 @@ def main():
         args.local = True
 
     activate_file_logging()
+    get_db_conn().close()
 
     if not args.user or not args.password:
         raise RuntimeError(
             "KSG 로그인 정보가 없습니다. "
-            "환경변수 KSG_ID 및 KSG_PW를 설정하세요."
+            "환경변수 KSG_ID 및 KSG_PW를 설정하거나 "
+            "--user 및 --password 옵션을 사용하세요."
         )
 
-    run_cron_job(args)
+    results = run_cron_job(args)
+
+    all_failed = all(
+        not result.get("ok")
+        for result in results
+    )
+
+    # 기존 데이터도 없고 모든 수집이 실패한 경우에만 실패 종료한다.
+    if all_failed and not has_any_stored_data():
+        log(
+            "[ERROR] 모든 수집이 실패했고 "
+            "기존 DB 데이터도 없습니다."
+        )
+        sys.exit(1)
+
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
