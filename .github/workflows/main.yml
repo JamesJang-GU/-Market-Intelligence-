@@ -30,6 +30,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run crawler and generate dashboard
+        env:
+          # 이 부분이 추가되었습니다: Secrets를 환경변수로 주입
+          KSG_ID: ${{ secrets.KSG_ID }}
+          KSG_PW: ${{ secrets.KSG_PW }}
         run: |
           python run_all.py
 
