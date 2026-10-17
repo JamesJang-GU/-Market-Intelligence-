@@ -17,10 +17,12 @@ GitHub Actions / GitHub Pages 정적 생성 모드:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import socket
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -29,9 +31,57 @@ from datetime import datetime
 from io import BytesIO, StringIO
 from pathlib import Path
 
+# =========================================================
+# 0. Dependency Setup
+# =========================================================
+def setup_environment():
+    """
+    로컬 PC 및 GitHub Actions 환경에서 필요한 패키지를 점검한다.
+    GSCPI xls 파일 읽기를 위해 xlrd가 필요하다.
+    """
+    required_packages = {
+        "pandas": "pandas",
+        "requests": "requests",
+        "flask": "flask",
+        "xlrd": "xlrd>=2.0.1",
+    }
+
+    for import_name, pip_name in required_packages.items():
+        if importlib.util.find_spec(import_name) is not None:
+            continue
+
+        print(
+            f"[SETUP] '{pip_name}' 패키지가 없어 설치를 시도합니다...",
+            flush=True,
+        )
+
+        try:
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    pip_name,
+                ]
+            )
+        except Exception:
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    pip_name,
+                    "--break-system-packages",
+                ]
+            )
+
+setup_environment()
+
 import pandas as pd
 import requests
-from flask import Flask, Response, render_template_string
+from flask import Flask, Response, send_from_directory
 
 # =========================================================
 # 1. Basic Configuration
@@ -92,6 +142,8 @@ REQUEST_HEADERS = {
     )
 }
 
+REQUEST_TIMEOUT_SECONDS = 90
+
 app = Flask(__name__)
 
 # =========================================================
@@ -102,7 +154,11 @@ def log(message):
 
 def is_port_available(host, port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_REUSEADDR,
+            1,
+        )
 
         try:
             sock.bind((host, port))
@@ -131,13 +187,17 @@ def find_available_port(host="127.0.0.1"):
 
     raise RuntimeError("사용 가능한 포트를 찾지 못했습니다.")
 
-def wait_and_open_browser(url, port, timeout=20):
+def wait_and_open_browser(url, host, port, timeout=20):
+    """
+    Flask 서버가 실제로 실행된 뒤 브라우저를 연다.
+    """
+    check_host = "127.0.0.1" if host == "0.0.0.0" else host
     start_time = time.time()
 
     while time.time() - start_time < timeout:
         try:
             with socket.create_connection(
-                ("127.0.0.1", port),
+                (check_host, port),
                 timeout=1,
             ):
                 webbrowser.open_new(url)
@@ -151,7 +211,9 @@ def wait_and_open_browser(url, port, timeout=20):
 # 3. SQLite Cache
 # =========================================================
 def init_cache_db():
-    """SQLite 캐시 DB와 테이블을 생성한다."""
+    """
+    SQLite 캐시 DB와 테이블을 생성한다.
+    """
     with sqlite3.connect(DB_PATH, timeout=30) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -170,7 +232,12 @@ def init_cache_db():
         connection.commit()
 
 def save_dataframe_cache(cache_key, dataframe):
-    """DataFrame을 SQLite JSON 캐시로 저장한다."""
+    """
+    DataFrame을 SQLite JSON 캐시 형태로 저장한다.
+    """
+    if dataframe is None:
+        dataframe = pd.DataFrame()
+
     init_cache_db()
 
     payload = dataframe.to_json(
@@ -209,7 +276,7 @@ def save_dataframe_cache(cache_key, dataframe):
 def load_dataframe_cache(cache_key, allow_expired=False):
     """
     SQLite에서 DataFrame 캐시를 읽는다.
-    allow_expired=True면 만료된 데이터도 반환한다.
+    allow_expired=True이면 만료된 캐시도 사용할 수 있다.
     """
     init_cache_db()
 
@@ -258,9 +325,8 @@ def load_dataframe_cache(cache_key, allow_expired=False):
 
 def get_cached_or_fetch(cache_key, fetch_function, force_refresh=False):
     """
-    캐시가 유효하면 캐시를 사용한다.
-    force_refresh=True면 최신 네트워크 수집을 시도한다.
-    네트워크 실패 시 만료된 기존 캐시를 대체 데이터로 사용한다.
+    유효 캐시가 있으면 캐시를 사용한다.
+    최신 수집 실패 시 만료된 기존 캐시를 fallback으로 사용한다.
     """
     if not force_refresh:
         cached = load_dataframe_cache(cache_key)
@@ -277,6 +343,9 @@ def get_cached_or_fetch(cache_key, fetch_function, force_refresh=False):
 
     try:
         dataframe = fetch_function()
+
+        if dataframe is None:
+            raise RuntimeError("수집 결과가 없습니다.")
 
         save_dataframe_cache(cache_key, dataframe)
 
@@ -308,19 +377,31 @@ def get_cached_or_fetch(cache_key, fetch_function, force_refresh=False):
 # 4. Data Collection
 # =========================================================
 def safe_get_json(url):
-    """JSON API 호출 함수."""
+    """
+    JSON API 호출 함수.
+    """
     response = requests.get(
         url,
         headers=REQUEST_HEADERS,
-        timeout=60,
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
 
     response.raise_for_status()
 
-    return response.json()
+    try:
+        return response.json()
+    except ValueError as error:
+        raise RuntimeError(
+            f"JSON 응답 파싱 실패: {url}"
+        ) from error
 
 def get_country_meta(force_refresh=False):
-    """World Bank 국가 및 지역 메타데이터를 가져온다."""
+    """
+    World Bank 국가 및 지역 메타데이터를 가져온다.
+
+    World Bank의 `id`는 ISO3 코드이며, indicator API의
+    `countryiso3code`와 연결하기 위해 이 값을 사용한다.
+    """
 
     def fetch():
         data = safe_get_json(COUNTRY_META_URL)
@@ -343,17 +424,17 @@ def get_country_meta(force_refresh=False):
             )
 
             country = item.get("name")
-            code = item.get("id")
+            iso3_code = str(item.get("id") or "").strip()
 
             if (
-                code
+                iso3_code
                 and country
                 and region
                 and region != "Aggregates"
             ):
                 output.append(
                     {
-                        "code": code,
+                        "code": iso3_code,
                         "country": country,
                         "region": region,
                     }
@@ -362,8 +443,8 @@ def get_country_meta(force_refresh=False):
         dataframe = pd.DataFrame(output)
 
         if dataframe.empty:
-            return pd.DataFrame(
-                columns=["code", "country", "region"]
+            raise RuntimeError(
+                "World Bank 국가 메타데이터가 비어 있습니다."
             )
 
         return (
@@ -384,7 +465,9 @@ def get_worldbank_indicator(
     value_name,
     force_refresh=False,
 ):
-    """World Bank GDP 또는 Inflation 시계열을 가져온다."""
+    """
+    World Bank GDP 또는 Inflation 시계열을 가져온다.
+    """
 
     def fetch():
         data = safe_get_json(url)
@@ -406,7 +489,7 @@ def get_worldbank_indicator(
                 else None
             )
 
-            code = (
+            code = str(
                 item.get("countryiso3code") or ""
             ).strip()
 
@@ -425,22 +508,24 @@ def get_worldbank_indicator(
                         value_name: float(value),
                     }
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 continue
 
         dataframe = pd.DataFrame(output)
 
         if dataframe.empty:
-            return pd.DataFrame(
-                columns=[
-                    "code",
-                    "country",
-                    "year",
-                    value_name,
-                ]
+            raise RuntimeError(
+                f"World Bank {value_name} 데이터가 비어 있습니다."
             )
 
-        return dataframe
+        return (
+            dataframe
+            .drop_duplicates(
+                subset=["code", "country", "year"]
+            )
+            .sort_values(["country", "year"])
+            .reset_index(drop=True)
+        )
 
     if WB_GDP_INDICATOR in url:
         cache_key = "worldbank_gdp_" + value_name
@@ -464,14 +549,20 @@ def get_gscpi_data(force_refresh=False):
         response = requests.get(
             GSCPI_XLS_URL,
             headers=REQUEST_HEADERS,
-            timeout=90,
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
 
         response.raise_for_status()
 
         content = response.content
 
+        if not content:
+            raise RuntimeError("GSCPI Excel 파일이 비어 있습니다.")
+
         excel_file = pd.ExcelFile(BytesIO(content))
+
+        if not excel_file.sheet_names:
+            raise RuntimeError("GSCPI Excel 시트를 찾지 못했습니다.")
 
         target_sheet = None
 
@@ -489,6 +580,11 @@ def get_gscpi_data(force_refresh=False):
             BytesIO(content),
             sheet_name=target_sheet,
         )
+
+        if dataframe.empty or dataframe.shape[1] < 2:
+            raise RuntimeError(
+                "GSCPI Excel 데이터의 컬럼 수가 부족합니다."
+            )
 
         normalized_columns = {
             str(column).strip().lower(): column
@@ -521,12 +617,21 @@ def get_gscpi_data(force_refresh=False):
             errors="coerce",
         )
 
+        output = output.dropna(
+            subset=["date", "gscpi"]
+        )
+
+        if output.empty:
+            raise RuntimeError(
+                "정제 후 GSCPI 데이터가 비어 있습니다."
+            )
+
         output["year"] = output["date"].dt.year
 
         return (
             output
-            .dropna(subset=["date", "gscpi"])
             .sort_values("date")
+            .drop_duplicates(subset=["date"])
             .reset_index(drop=True)
         )
 
@@ -536,24 +641,43 @@ def get_gscpi_data(force_refresh=False):
         force_refresh=force_refresh,
     )
 
-    if not dataframe.empty:
-        dataframe["date"] = pd.to_datetime(
-            dataframe["date"],
-            errors="coerce",
-        )
+    if dataframe.empty:
+        return dataframe
 
-        dataframe["year"] = pd.to_numeric(
+    dataframe = dataframe.copy()
+
+    dataframe["date"] = pd.to_datetime(
+        dataframe["date"],
+        errors="coerce",
+    )
+
+    dataframe["gscpi"] = pd.to_numeric(
+        dataframe["gscpi"],
+        errors="coerce",
+    )
+
+    dataframe = dataframe.dropna(
+        subset=["date", "gscpi"]
+    )
+
+    dataframe["year"] = (
+        pd.to_numeric(
             dataframe["year"],
             errors="coerce",
-        ).astype("Int64")
+        )
+        .astype("Int64")
+    )
 
-    return dataframe
+    return dataframe.sort_values("date").reset_index(drop=True)
 
 # =========================================================
 # 5. Static Data Generation
 # =========================================================
 def dataframe_to_records(dataframe, date_columns=None):
-    """DataFrame을 JSON 저장용 record 배열로 전환한다."""
+    """
+    DataFrame을 정적 JSON 파일용 record 배열로 바꾼다.
+    NaN, Infinity, Timestamp를 JSON 호환 형식으로 정리한다.
+    """
     if dataframe is None or dataframe.empty:
         return []
 
@@ -567,13 +691,24 @@ def dataframe_to_records(dataframe, date_columns=None):
                     errors="coerce",
                 ).dt.strftime("%Y-%m-%d")
 
+    output = output.replace(
+        [float("inf"), float("-inf")],
+        pd.NA,
+    )
+
     output = output.where(pd.notnull(output), None)
 
-    return output.to_dict(orient="records")
+    return json.loads(
+        output.to_json(
+            orient="records",
+            force_ascii=False,
+            date_format="iso",
+        )
+    )
 
 def collect_dashboard_data(force_refresh=False):
     """
-    모든 원천 데이터를 수집하고 정적 페이지에서 사용할 구조로 정리한다.
+    모든 원천 데이터를 수집하고 Dashboard용 구조로 정리한다.
     """
     meta = get_country_meta(force_refresh=force_refresh)
 
@@ -597,13 +732,32 @@ def collect_dashboard_data(force_refresh=False):
         meta,
         on=["code", "country"],
         how="left",
+        validate="many_to_one",
     )
 
     inflation = inflation.merge(
         meta,
         on=["code", "country"],
         how="left",
+        validate="many_to_one",
     )
+
+    missing_gdp_region = int(gdp["region"].isna().sum())
+    missing_inflation_region = int(
+        inflation["region"].isna().sum()
+    )
+
+    if missing_gdp_region:
+        log(
+            "[WARN] GDP 지역 메타데이터 미매칭 행 수: "
+            f"{missing_gdp_region:,}"
+        )
+
+    if missing_inflation_region:
+        log(
+            "[WARN] Inflation 지역 메타데이터 미매칭 행 수: "
+            f"{missing_inflation_region:,}"
+        )
 
     gdp = gdp.dropna(
         subset=["country", "year", "gdp_growth"]
@@ -635,8 +789,25 @@ def collect_dashboard_data(force_refresh=False):
         ),
     }
 
+def atomic_write_text(path, text):
+    """
+    중간 저장 실패로 인한 불완전한 정적 파일 배포를 방지한다.
+    """
+    temporary_path = path.with_suffix(
+        path.suffix + ".tmp"
+    )
+
+    temporary_path.write_text(
+        text,
+        encoding="utf-8",
+    )
+
+    temporary_path.replace(path)
+
 def write_static_json_files(data):
-    """GitHub Pages용 JSON 데이터 파일을 생성한다."""
+    """
+    GitHub Pages용 JSON 데이터 파일을 생성한다.
+    """
     macro_payload = {
         "countries": data["countries"],
         "gdp": data["gdp"],
@@ -666,31 +837,34 @@ def write_static_json_files(data):
         },
     }
 
-    MACRO_JSON_PATH.write_text(
+    atomic_write_text(
+        MACRO_JSON_PATH,
         json.dumps(
             macro_payload,
             ensure_ascii=False,
             separators=(",", ":"),
+            allow_nan=False,
         ),
-        encoding="utf-8",
     )
 
-    GSCPI_JSON_PATH.write_text(
+    atomic_write_text(
+        GSCPI_JSON_PATH,
         json.dumps(
             gscpi_payload,
             ensure_ascii=False,
             separators=(",", ":"),
+            allow_nan=False,
         ),
-        encoding="utf-8",
     )
 
-    META_JSON_PATH.write_text(
+    atomic_write_text(
+        META_JSON_PATH,
         json.dumps(
             meta_payload,
             ensure_ascii=False,
             indent=2,
+            allow_nan=False,
         ),
-        encoding="utf-8",
     )
 
     log(f"[STATIC] 생성 완료: {MACRO_JSON_PATH.name}")
@@ -705,296 +879,206 @@ STATIC_HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
-<title>GDP, Inflation & GSCPI Dashboard</title>
+<title>GDP, Inflation &amp; GSCPI Dashboard</title>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 
 <style>
 :root {
-    --navy: #12355b;
-    --blue: #1d4ed8;
-    --teal: #0f766e;
-    --red: #b91c1c;
-    --bg: #f3f6fb;
-    --card: #ffffff;
-    --line: #d9e2ec;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --warn-bg: #fff8e1;
-    --warn-text: #7a5a00;
+    --navy:#12355b;
+    --blue:#1d4ed8;
+    --teal:#0f766e;
+    --red:#b91c1c;
+    --bg:#f3f6fb;
+    --card:#ffffff;
+    --line:#d9e2ec;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --warn-bg:#fff8e1;
+    --warn-text:#7a5a00;
 }
-
-* {
-    box-sizing: border-box;
-}
-
+* { box-sizing:border-box; }
 body {
-    font-family: "Segoe UI", Arial, sans-serif;
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
+    font-family:"Segoe UI", Arial, sans-serif;
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
 }
-
 .wrap {
-    max-width: 1520px;
-    margin: 0 auto;
-    padding: 24px;
+    max-width:1520px;
+    margin:0 auto;
+    padding:24px;
 }
-
 .hero {
-    background: linear-gradient(135deg, var(--navy), var(--teal));
-    color: #ffffff;
-    padding: 28px;
-    border-radius: 18px;
-    margin-bottom: 20px;
+    background:linear-gradient(135deg,var(--navy),var(--teal));
+    color:#ffffff;
+    padding:28px;
+    border-radius:18px;
+    margin-bottom:20px;
 }
-
 .hero h1 {
-    margin: 0 0 10px 0;
-    font-size: 30px;
+    margin:0 0 10px 0;
+    font-size:30px;
 }
-
 .meta {
-    font-size: 13px;
-    opacity: 0.95;
-    line-height: 1.7;
+    font-size:13px;
+    opacity:.96;
+    line-height:1.7;
 }
-
-.tabs {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 18px;
-}
-
-.tab {
-    display: inline-block;
-    padding: 11px 18px;
-    border-radius: 12px;
-    text-decoration: none;
-    background: #dbe4f0;
-    color: #16324f;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-.tab.active {
-    background: var(--navy);
-    color: #ffffff;
-}
-
-.panel {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 18px;
-    box-shadow: 0 4px 14px rgba(18, 53, 91, 0.06);
-    margin-bottom: 18px;
-    width: 100%;
-}
-
-.section-title {
-    margin: 0 0 14px 0;
-    font-size: 18px;
-    color: var(--navy);
-}
-
-.grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-}
-
-.row2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-}
-
-.kpi {
-    background: linear-gradient(180deg, #ffffff, #f8fbff);
-    border: 1px solid var(--line);
-    border-left: 6px solid var(--blue);
-    padding: 16px;
-    border-radius: 14px;
-}
-
-.kpi .label {
-    color: var(--muted);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-}
-
-.kpi .value {
-    margin-top: 8px;
-    font-size: 23px;
-    font-weight: 800;
-    color: var(--navy);
-    word-break: break-word;
-}
-
-label {
-    display: block;
-    font-size: 13px;
-    color: var(--muted);
-    margin-bottom: 6px;
-    font-weight: 600;
-}
-
-select {
-    width: 100%;
-    padding: 11px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: #ffffff;
-}
-
-button,
-.download-button {
-    padding: 10px 14px;
-    border: none;
-    background: var(--navy);
-    color: #ffffff;
-    border-radius: 10px;
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-block;
-    font-weight: 600;
-}
-
-button:hover,
-.download-button:hover {
-    opacity: 0.9;
-}
-
-.select-tools {
-    display: flex;
-    gap: 7px;
-    margin: 0 0 7px 0;
-    flex-wrap: wrap;
-}
-
-.select-tools button {
-    padding: 6px 10px;
-    font-size: 12px;
-    background: #475569;
-}
-
-.select-tools button:first-child {
-    background: var(--teal);
-}
-
-.btn-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-}
-
-.icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 72px;
-    height: 32px;
-    border-radius: 8px;
-    text-decoration: none;
-    color: #ffffff;
-    font-size: 12px;
-    font-weight: 700;
-    border: none;
-    cursor: pointer;
-}
-
-.icon-csv {
-    background: #2563eb;
-}
-
-.warning {
-    background: var(--warn-bg);
-    color: var(--warn-text);
-    border: 1px solid #f5d76e;
-    padding: 14px;
-    border-radius: 12px;
-    margin-bottom: 16px;
-    display: none;
-}
-
-.loading {
-    padding: 50px;
-    text-align: center;
-    font-weight: 700;
-    color: var(--muted);
-}
-
-.empty {
-    padding: 40px;
-    text-align: center;
-    color: var(--muted);
-}
-
-.chart {
-    width: 100%;
-    min-height: 430px;
-}
-
-ul.exec {
-    margin: 0;
-    padding-left: 18px;
-}
-
-ul.exec li {
-    margin: 10px 0;
-    line-height: 1.6;
-}
-
-.subnote {
-    margin-top: 8px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.6;
-}
-
-.hidden {
-    display: none;
-}
-
 .source-link {
-    color: inherit;
-    text-decoration: underline;
+    color:inherit;
+    text-decoration:underline;
 }
-
-@media (max-width: 1050px) {
-    .grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .row2 {
-        grid-template-columns: 1fr;
-    }
+.tabs {
+    display:flex;
+    gap:10px;
+    margin-bottom:18px;
 }
+.tab {
+    display:inline-block;
+    padding:11px 18px;
+    border-radius:12px;
+    text-decoration:none;
+    background:#dbe4f0;
+    color:#16324f;
+    font-weight:700;
+    cursor:pointer;
+}
+.tab.active {
+    background:var(--navy);
+    color:#ffffff;
+}
+.panel {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:18px;
+    box-shadow:0 4px 14px rgba(18,53,91,.06);
+    margin-bottom:18px;
+    width:100%;
+}
+.section-title {
+    margin:0 0 14px 0;
+    font-size:18px;
+    color:var(--navy);
+}
+.grid {
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:16px;
+}
+.row2 {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:18px;
+}
+.kpi {
+    background:linear-gradient(180deg,#ffffff,#f8fbff);
+    border:1px solid var(--line);
+    border-left:6px solid var(--blue);
+    padding:16px;
+    border-radius:14px;
+}
+.kpi .label {
+    color:var(--muted);
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.4px;
+}
+.kpi .value {
+    margin-top:8px;
+    font-size:23px;
+    font-weight:800;
+    color:var(--navy);
+    word-break:break-word;
+}
+label {
+    display:block;
+    font-size:13px;
+    color:var(--muted);
+    margin-bottom:6px;
+    font-weight:600;
+}
+select {
+    width:100%;
+    padding:11px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:#ffffff;
+}
+button {
+    padding:10px 14px;
+    border:none;
+    background:var(--navy);
+    color:#ffffff;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:600;
+}
+button:hover { opacity:.9; }
+.select-tools,
+.btn-row {
+    display:flex;
+    gap:7px;
+    margin:0 0 8px 0;
+    flex-wrap:wrap;
+}
+.select-tools button {
+    padding:6px 10px;
+    font-size:12px;
+    background:#475569;
+}
+.select-tools button:first-child { background:var(--teal); }
+.icon-csv {
+    background:#2563eb;
+    font-size:12px;
+}
+.warning {
+    background:var(--warn-bg);
+    color:var(--warn-text);
+    border:1px solid #f5d76e;
+    padding:14px;
+    border-radius:12px;
+    margin-bottom:16px;
+    display:none;
+}
+.loading,
+.empty {
+    padding:50px;
+    text-align:center;
+    font-weight:700;
+    color:var(--muted);
+}
+.chart {
+    width:100%;
+    min-height:430px;
+}
+ul.exec {
+    margin:0;
+    padding-left:18px;
+}
+ul.exec li {
+    margin:10px 0;
+    line-height:1.6;
+}
+.subnote {
+    margin-top:8px;
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.6;
+}
+.hidden { display:none; }
 
-@media (max-width: 650px) {
-    .wrap {
-        padding: 14px;
-    }
-
-    .hero {
-        padding: 20px;
-    }
-
-    .hero h1 {
-        font-size: 24px;
-    }
-
-    .grid {
-        grid-template-columns: 1fr;
-    }
-
-    .tabs {
-        flex-wrap: wrap;
-    }
+@media (max-width:1050px) {
+    .grid { grid-template-columns:repeat(2,1fr); }
+    .row2 { grid-template-columns:1fr; }
+}
+@media (max-width:650px) {
+    .wrap { padding:14px; }
+    .hero { padding:20px; }
+    .hero h1 { font-size:24px; }
+    .grid { grid-template-columns:1fr; }
+    .tabs { flex-wrap:wrap; }
 }
 </style>
 </head>
@@ -1007,7 +1091,7 @@ ul.exec li {
         <div class="meta">
             <div>
                 <b>출처</b> |
-                GDP, Inflation:
+                GDP / Inflation:
                 <a class="source-link"
                    href="https://data.worldbank.org/"
                    target="_blank"
@@ -1036,7 +1120,6 @@ ul.exec li {
         <a id="macroTab" class="tab active" onclick="showTab('macro')">
             GDP + Inflation
         </a>
-
         <a id="gscpiTab" class="tab" onclick="showTab('gscpi')">
             GSCPI
         </a>
@@ -1073,17 +1156,15 @@ ul.exec li {
                         <button type="button" onclick="setAllCountries(true)">
                             권역 전체 선택
                         </button>
-
                         <button type="button" onclick="setAllCountries(false)">
                             선택 해제
                         </button>
                     </div>
 
-                    <select
-                        id="countrySelect"
-                        multiple
-                        size="8"
-                        onchange="renderMacroDashboard()">
+                    <select id="countrySelect"
+                            multiple
+                            size="8"
+                            onchange="renderMacroDashboard()">
                     </select>
                 </div>
             </div>
@@ -1100,17 +1181,14 @@ ul.exec li {
                 <div class="label">Selected Countries</div>
                 <div class="value" id="selectedCountriesKpi">-</div>
             </div>
-
             <div class="kpi">
                 <div class="label">GDP Latest Year</div>
                 <div class="value" id="latestGdpYearKpi">-</div>
             </div>
-
             <div class="kpi">
                 <div class="label">Inflation Latest Year</div>
                 <div class="value" id="latestInflationYearKpi">-</div>
             </div>
-
             <div class="kpi">
                 <div class="label">Selected Region</div>
                 <div class="value" id="selectedRegionKpi">-</div>
@@ -1120,58 +1198,43 @@ ul.exec li {
         <div class="row2">
             <div class="panel">
                 <h3 class="section-title">GDP 성장률 추이</h3>
-
                 <div class="btn-row">
-                    <button class="icon-btn icon-csv"
-                            onclick="downloadMacroData('gdp')">
+                    <button class="icon-csv" onclick="downloadMacroData('gdp')">
                         CSV 다운로드
                     </button>
                 </div>
-
                 <div id="gdpLine" class="chart"></div>
             </div>
 
             <div class="panel">
                 <h3 class="section-title">Inflation 추이</h3>
-
                 <div class="btn-row">
-                    <button class="icon-btn icon-csv"
-                            onclick="downloadMacroData('inflation')">
+                    <button class="icon-csv" onclick="downloadMacroData('inflation')">
                         CSV 다운로드
                     </button>
                 </div>
-
                 <div id="inflationLine" class="chart"></div>
             </div>
         </div>
 
         <div class="panel">
             <h3 class="section-title">GDP / Inflation 평균 비교</h3>
-
             <div class="btn-row">
-                <button class="icon-btn icon-csv"
-                        onclick="downloadMacroData('macro_compare')">
+                <button class="icon-csv" onclick="downloadMacroData('macro_compare')">
                     CSV 다운로드
                 </button>
             </div>
-
             <div id="macroCompareChart" class="chart"></div>
         </div>
 
         <div class="row2">
             <div class="panel">
-                <h3 class="section-title">
-                    국가별 최신 GDP 성장률 비교
-                </h3>
-
+                <h3 class="section-title">국가별 최신 GDP 성장률 비교</h3>
                 <div id="gdpBar" class="chart"></div>
             </div>
 
             <div class="panel">
-                <h3 class="section-title">
-                    국가별 최신 Inflation 비교
-                </h3>
-
+                <h3 class="section-title">국가별 최신 Inflation 비교</h3>
                 <div id="inflationBar" class="chart"></div>
             </div>
         </div>
@@ -1197,10 +1260,8 @@ ul.exec li {
             <div class="grid">
                 <div>
                     <label for="gscpiYearsSelect">기간 선택</label>
-
-                    <select
-                        id="gscpiYearsSelect"
-                        onchange="renderGscpiDashboard()">
+                    <select id="gscpiYearsSelect"
+                            onchange="renderGscpiDashboard()">
                         <option value="5">최근 5개년</option>
                         <option value="10" selected>최근 10개년</option>
                         <option value="20">최근 20개년</option>
@@ -1214,17 +1275,14 @@ ul.exec li {
                 <div class="label">Latest Point</div>
                 <div class="value" id="latestGscpiKpi">-</div>
             </div>
-
             <div class="kpi">
                 <div class="label">Average, Last 12M</div>
                 <div class="value" id="avgGscpiKpi">-</div>
             </div>
-
             <div class="kpi">
                 <div class="label">Maximum, Last 12M</div>
                 <div class="value" id="maxGscpiKpi">-</div>
             </div>
-
             <div class="kpi">
                 <div class="label">Minimum, Last 12M</div>
                 <div class="value" id="minGscpiKpi">-</div>
@@ -1234,22 +1292,16 @@ ul.exec li {
         <div class="row2">
             <div class="panel">
                 <h3 class="section-title">GSCPI 추이</h3>
-
                 <div class="btn-row">
-                    <button class="icon-btn icon-csv"
-                            onclick="downloadGscpiData()">
+                    <button class="icon-csv" onclick="downloadGscpiData()">
                         CSV 다운로드
                     </button>
                 </div>
-
                 <div id="gscpiLine" class="chart"></div>
             </div>
 
             <div class="panel">
-                <h3 class="section-title">
-                    최근 12개월 GSCPI 비교
-                </h3>
-
+                <h3 class="section-title">최근 12개월 GSCPI 비교</h3>
                 <div id="gscpiBar" class="chart"></div>
             </div>
         </div>
@@ -1262,6 +1314,17 @@ ul.exec li {
 </div>
 
 <script>
+const DEFAULT_COUNTRIES = [
+    "Canada",
+    "France",
+    "Germany",
+    "Italy",
+    "Japan",
+    "United Kingdom",
+    "United States",
+    "Korea, Rep."
+];
+
 let macroData = {
     countries: [],
     gdp: [],
@@ -1276,8 +1339,7 @@ let activeTab = "macro";
 
 function showWarning(message) {
     const warning = document.getElementById("warning");
-
-    warning.innerText = message;
+    warning.textContent = message;
     warning.style.display = "block";
 }
 
@@ -1314,7 +1376,7 @@ function chartLayout(title, yAxisTitle) {
         height: 440,
         margin: {
             l: 55,
-            r: 30,
+            r: 40,
             t: title ? 60 : 30,
             b: 65
         },
@@ -1338,11 +1400,13 @@ function chartLayout(title, yAxisTitle) {
 
 function emptyChart(elementId, message) {
     const element = document.getElementById(elementId);
+    element.innerHTML = "";
 
-    element.innerHTML =
-        "<div class='empty'>"
-        + message
-        + "</div>";
+    const box = document.createElement("div");
+    box.className = "empty";
+    box.textContent = message;
+
+    element.appendChild(box);
 }
 
 function getSelectedCountries() {
@@ -1350,18 +1414,6 @@ function getSelectedCountries() {
 
     return Array.from(select.selectedOptions).map(
         option => option.value
-    );
-}
-
-function getSelectedYears() {
-    return Number(
-        document.getElementById("yearsSelect").value
-    );
-}
-
-function getSelectedGscpiYears() {
-    return Number(
-        document.getElementById("gscpiYearsSelect").value
     );
 }
 
@@ -1375,21 +1427,16 @@ function uniqueRegions() {
 
 function populateRegionSelect() {
     const select = document.getElementById("regionSelect");
-
     select.innerHTML = "";
 
-    const allOption = new Option("전체", "전체");
-    select.add(allOption);
+    select.add(new Option("전체", "전체"));
 
     uniqueRegions().forEach(region => {
         select.add(new Option(region, region));
     });
 }
 
-function populateCountrySelect(
-    selectedRegion,
-    selectedCountries = []
-) {
+function populateCountrySelect(selectedRegion, selectedCountries) {
     const countrySelect = document.getElementById("countrySelect");
 
     let countries = macroData.countries;
@@ -1400,18 +1447,16 @@ function populateCountrySelect(
         );
     }
 
-    countries = countries
+    const names = countries
         .map(item => item.country)
         .filter(Boolean)
         .sort();
 
     countrySelect.innerHTML = "";
 
-    countries.forEach(country => {
+    names.forEach(country => {
         const option = new Option(country, country);
-
         option.selected = selectedCountries.includes(country);
-
         countrySelect.add(option);
     });
 }
@@ -1427,8 +1472,9 @@ function setAllCountries(selected) {
 }
 
 function onRegionChange() {
-    const selectedRegion =
-        document.getElementById("regionSelect").value;
+    const selectedRegion = document.getElementById(
+        "regionSelect"
+    ).value;
 
     const countries = macroData.countries
         .filter(item => {
@@ -1440,12 +1486,11 @@ function onRegionChange() {
         .map(item => item.country);
 
     populateCountrySelect(selectedRegion, countries);
-
     renderMacroDashboard();
 }
 
 function yearsFilter(data, years) {
-    if (!data || data.length === 0) {
+    if (!data || !data.length) {
         return [];
     }
 
@@ -1460,29 +1505,29 @@ function yearsFilter(data, years) {
 
 function selectedMacroData(metric) {
     const countries = getSelectedCountries();
-    const years = getSelectedYears();
+    const years = Number(
+        document.getElementById("yearsSelect").value
+    );
 
-    const source =
-        metric === "gdp"
-            ? macroData.gdp
-            : macroData.inflation;
+    const source = metric === "gdp"
+        ? macroData.gdp
+        : macroData.inflation;
 
-    const selected = source.filter(item => {
-        return countries.includes(item.country);
-    });
-
-    return yearsFilter(selected, years);
+    return yearsFilter(
+        source.filter(item => countries.includes(item.country)),
+        years
+    );
 }
 
 function latestByCountry(data, fieldName) {
     const map = new Map();
 
     data.forEach(item => {
-        const current = map.get(item.country);
+        const oldValue = map.get(item.country);
 
         if (
-            !current
-            || Number(item.year) > Number(current.year)
+            !oldValue
+            || Number(item.year) > Number(oldValue.year)
         ) {
             map.set(item.country, item);
         }
@@ -1518,7 +1563,7 @@ function drawLineChart(
     data,
     fieldName,
     yAxisTitle,
-    colorPalette
+    colors
 ) {
     if (!data.length) {
         emptyChart(elementId, "데이터 없음");
@@ -1533,15 +1578,13 @@ function drawLineChart(
 
             return {
                 x: rows.map(item => item.year),
-                y: rows.map(item => item[fieldName]),
+                y: rows.map(item => Number(item[fieldName])),
                 mode: "lines+markers",
                 type: "scatter",
                 name: country,
                 line: {
                     width: 2.5,
-                    color: colorPalette[
-                        index % colorPalette.length
-                    ]
+                    color: colors[index % colors.length]
                 },
                 marker: {
                     size: 6
@@ -1566,7 +1609,7 @@ function drawBarChart(
     data,
     fieldName,
     yAxisTitle,
-    barColor
+    color
 ) {
     if (!data.length) {
         emptyChart(elementId, "데이터 없음");
@@ -1578,12 +1621,12 @@ function drawBarChart(
     );
 
     const trace = {
-        x: sorted.map(item => item[fieldName]),
+        x: sorted.map(item => Number(item[fieldName])),
         y: sorted.map(item => item.country),
         type: "bar",
         orientation: "h",
         marker: {
-            color: barColor
+            color: color
         },
         text: sorted.map(
             item => numberFormat(item[fieldName], 2)
@@ -1596,7 +1639,6 @@ function drawBarChart(
     };
 
     const layout = chartLayout("", yAxisTitle);
-
     layout.margin.l = 145;
 
     Plotly.react(
@@ -1611,58 +1653,54 @@ function drawBarChart(
 }
 
 function drawMacroCompareChart(gdp, inflation) {
-    if (!gdp.length && !inflation.length) {
-        emptyChart(
-            "macroCompareChart",
-            "데이터 없음"
-        );
-        return;
-    }
+    const makeAverage = function(data, fieldName) {
+        const map = {};
 
-    const gdpYearMap = {};
-    const inflationYearMap = {};
+        data.forEach(item => {
+            if (!map[item.year]) {
+                map[item.year] = [];
+            }
 
-    gdp.forEach(item => {
-        if (!gdpYearMap[item.year]) {
-            gdpYearMap[item.year] = [];
-        }
+            map[item.year].push(Number(item[fieldName]));
+        });
 
-        gdpYearMap[item.year].push(
-            Number(item.gdp_growth)
-        );
-    });
+        const years = Object.keys(map)
+            .map(Number)
+            .sort((a, b) => a - b);
 
-    inflation.forEach(item => {
-        if (!inflationYearMap[item.year]) {
-            inflationYearMap[item.year] = [];
-        }
-
-        inflationYearMap[item.year].push(
-            Number(item.inflation)
-        );
-    });
-
-    const gdpYears = Object.keys(gdpYearMap)
-        .map(Number)
-        .sort((a, b) => a - b);
-
-    const inflationYears = Object.keys(inflationYearMap)
-        .map(Number)
-        .sort((a, b) => a - b);
-
-    const traces = [];
-
-    if (gdpYears.length) {
-        traces.push({
-            x: gdpYears,
-            y: gdpYears.map(year => {
-                const values = gdpYearMap[year];
+        return {
+            years: years,
+            values: years.map(year => {
+                const values = map[year];
 
                 return values.reduce(
                     (sum, value) => sum + value,
                     0
                 ) / values.length;
-            }),
+            })
+        };
+    };
+
+    const gdpAverage = makeAverage(gdp, "gdp_growth");
+    const inflationAverage = makeAverage(
+        inflation,
+        "inflation"
+    );
+
+    if (
+        !gdpAverage.years.length
+        && !inflationAverage.years.length
+    ) {
+        emptyChart("macroCompareChart", "데이터 없음");
+        return;
+    }
+
+    const traces = [];
+
+    if (gdpAverage.years.length) {
+        traces.push({
+            x: gdpAverage.years,
+            y: gdpAverage.values,
             mode: "lines+markers",
             type: "scatter",
             name: "GDP 평균",
@@ -1677,17 +1715,10 @@ function drawMacroCompareChart(gdp, inflation) {
         });
     }
 
-    if (inflationYears.length) {
+    if (inflationAverage.years.length) {
         traces.push({
-            x: inflationYears,
-            y: inflationYears.map(year => {
-                const values = inflationYearMap[year];
-
-                return values.reduce(
-                    (sum, value) => sum + value,
-                    0
-                ) / values.length;
-            }),
+            x: inflationAverage.years,
+            y: inflationAverage.values,
             mode: "lines+markers",
             type: "scatter",
             name: "Inflation 평균",
@@ -1702,10 +1733,7 @@ function drawMacroCompareChart(gdp, inflation) {
         });
     }
 
-    const layout = chartLayout(
-        "",
-        "GDP 성장률 (%)"
-    );
+    const layout = chartLayout("", "GDP 성장률 (%)");
 
     layout.yaxis2 = {
         title: "Inflation (%)",
@@ -1738,14 +1766,14 @@ function buildMacroInsights(data, fieldName, metricName) {
         item => Number(item[fieldName])
     );
 
-    const average =
-        values.reduce((sum, value) => sum + value, 0)
-        / values.length;
+    const average = values.reduce(
+        (sum, value) => sum + value,
+        0
+    ) / values.length;
 
     const maximum = latest.reduce(
         (current, item) => {
-            return Number(item[fieldName])
-                > Number(current[fieldName])
+            return Number(item[fieldName]) > Number(current[fieldName])
                 ? item
                 : current;
         },
@@ -1754,17 +1782,12 @@ function buildMacroInsights(data, fieldName, metricName) {
 
     const minimum = latest.reduce(
         (current, item) => {
-            return Number(item[fieldName])
-                < Number(current[fieldName])
+            return Number(item[fieldName]) < Number(current[fieldName])
                 ? item
                 : current;
         },
         latest[0]
     );
-
-    const spread =
-        Number(maximum[fieldName])
-        - Number(minimum[fieldName]);
 
     const yearly = {};
 
@@ -1782,91 +1805,60 @@ function buildMacroInsights(data, fieldName, metricName) {
         .map(Number)
         .sort((a, b) => a - b);
 
-    let trendText =
-        metricName + " 추세 판단: 비교 가능한 연도 수 부족";
+    let trend = "비교 가능한 연도 수 부족";
 
     if (years.length >= 2) {
-        const latestYear = years[years.length - 1];
+        const recentYear = years[years.length - 1];
         const previousYear = years[years.length - 2];
 
-        const latestAverage =
-            yearly[latestYear].reduce(
-                (sum, value) => sum + value,
-                0
-            ) / yearly[latestYear].length;
+        const recentAverage = yearly[recentYear].reduce(
+            (sum, value) => sum + value,
+            0
+        ) / yearly[recentYear].length;
 
-        const previousAverage =
-            yearly[previousYear].reduce(
-                (sum, value) => sum + value,
-                0
-            ) / yearly[previousYear].length;
+        const previousAverage = yearly[previousYear].reduce(
+            (sum, value) => sum + value,
+            0
+        ) / yearly[previousYear].length;
 
-        const difference =
-            latestAverage - previousAverage;
+        const difference = recentAverage - previousAverage;
 
-        if (difference > 0) {
-            trendText =
-                "전년 대비 평균 "
-                + metricName
-                + ": "
-                + numberFormat(difference, 2)
-                + "p 상승";
-        } else if (difference < 0) {
-            trendText =
-                "전년 대비 평균 "
-                + metricName
-                + ": "
-                + numberFormat(
-                    Math.abs(difference),
-                    2
-                )
-                + "p 하락";
-        } else {
-            trendText =
-                "전년 대비 평균 "
-                + metricName
-                + ": 유사한 수준 유지";
-        }
+        trend = difference > 0
+            ? "전년 대비 평균 " + metricName + " "
+                + numberFormat(difference, 2) + "p 상승"
+            : difference < 0
+                ? "전년 대비 평균 " + metricName + " "
+                    + numberFormat(Math.abs(difference), 2) + "p 하락"
+                : "전년 대비 평균 " + metricName + " 유사한 수준 유지";
     }
 
-    const levelText =
-        average >= 0
-            ? "최신 평균 "
-              + metricName
-              + ": "
-              + numberFormat(average, 2)
-              + "% (플러스 영역)"
-            : "최신 평균 "
-              + metricName
-              + ": "
-              + numberFormat(average, 2)
-              + "% (마이너스 영역)";
-
     return [
-        levelText,
-        "최고 국가: "
-            + maximum.country
-            + " ("
-            + numberFormat(maximum[fieldName], 2)
-            + "%)",
-        "최저 국가: "
-            + minimum.country
-            + " ("
-            + numberFormat(minimum[fieldName], 2)
-            + "%)",
+        "최신 평균 " + metricName + ": "
+            + numberFormat(average, 2) + "%",
+        "최고 국가: " + maximum.country + " ("
+            + numberFormat(maximum[fieldName], 2) + "%)",
+        "최저 국가: " + minimum.country + " ("
+            + numberFormat(minimum[fieldName], 2) + "%)",
         "국가 간 격차: "
-            + numberFormat(spread, 2)
+            + numberFormat(
+                Number(maximum[fieldName])
+                - Number(minimum[fieldName]),
+                2
+            )
             + "p",
-        trendText
+        trend
     ];
 }
 
 function renderInsightList(elementId, insights) {
     const element = document.getElementById(elementId);
+    element.innerHTML = "";
 
-    element.innerHTML = insights.map(
-        insight => "<li>" + insight + "</li>"
-    ).join("");
+    insights.forEach(insight => {
+        const item = document.createElement("li");
+        item.textContent = insight;
+        element.appendChild(item);
+    });
 }
 
 function renderMacroDashboard() {
@@ -1874,47 +1866,49 @@ function renderMacroDashboard() {
         return;
     }
 
-    const selectedRegion =
-        document.getElementById("regionSelect").value;
+    const selectedRegion = document.getElementById(
+        "regionSelect"
+    ).value;
 
     const selectedCountries = getSelectedCountries();
 
     const gdp = selectedMacroData("gdp");
     const inflation = selectedMacroData("inflation");
 
-    document.getElementById("selectedCountriesKpi").innerText =
+    document.getElementById("selectedCountriesKpi").textContent =
         selectedCountries.length;
 
-    document.getElementById("selectedRegionKpi").innerText =
+    document.getElementById("selectedRegionKpi").textContent =
         selectedRegion;
 
-    document.getElementById("latestGdpYearKpi").innerText =
+    document.getElementById("latestGdpYearKpi").textContent =
         gdp.length
             ? Math.max(...gdp.map(item => Number(item.year)))
             : "-";
 
-    document.getElementById("latestInflationYearKpi").innerText =
-        inflation.length
-            ? Math.max(
-                ...inflation.map(item => Number(item.year))
-            )
-            : "-";
+    document.getElementById(
+        "latestInflationYearKpi"
+    ).textContent = inflation.length
+        ? Math.max(...inflation.map(item => Number(item.year)))
+        : "-";
+
+    const colors = [
+        "#1d4ed8",
+        "#0f766e",
+        "#b91c1c",
+        "#7c3aed",
+        "#c2410c",
+        "#0369a1",
+        "#15803d",
+        "#be123c"
+    ];
 
     drawLineChart(
         "gdpLine",
         gdp,
         "gdp_growth",
         "GDP 성장률 (%)",
-        [
-            "#1d4ed8",
-            "#0f766e",
-            "#b91c1c",
-            "#7c3aed",
-            "#c2410c",
-            "#0369a1",
-            "#15803d",
-            "#be123c"
-        ]
+        colors
     );
 
     drawLineChart(
@@ -1922,16 +1916,7 @@ function renderMacroDashboard() {
         inflation,
         "inflation",
         "Inflation (%)",
-        [
-            "#b91c1c",
-            "#c2410c",
-            "#7c3aed",
-            "#0369a1",
-            "#0f766e",
-            "#1d4ed8",
-            "#15803d",
-            "#be123c"
-        ]
+        colors.slice().reverse()
     );
 
     drawMacroCompareChart(gdp, inflation);
@@ -1947,40 +1932,33 @@ function renderMacroDashboard() {
     drawBarChart(
         "inflationBar",
         latestByCountry(inflation, "inflation"),
+        "inflation",
         "Inflation (%)",
         "#b91c1c"
     );
 
     renderInsightList(
         "gdpInsights",
-        buildMacroInsights(
-            gdp,
-            "gdp_growth",
-            "GDP 성장률"
-        )
+        buildMacroInsights(gdp, "gdp_growth", "GDP 성장률")
     );
 
     renderInsightList(
         "inflationInsights",
-        buildMacroInsights(
-            inflation,
-            "inflation",
-            "Inflation"
-        )
+        buildMacroInsights(inflation, "inflation", "Inflation")
     );
 }
 
 function selectedGscpiData() {
-    const years = getSelectedGscpiYears();
+    const years = Number(
+        document.getElementById("gscpiYearsSelect").value
+    );
 
     if (!gscpiData.gscpi.length) {
         return [];
     }
 
     const maxYear = Math.max(
-        ...gscpiData.gscpi.map(
-            item => Number(item.year)
-        )
+        ...gscpiData.gscpi.map(item => Number(item.year))
     );
 
     const minYear = maxYear - years + 1;
@@ -2004,73 +1982,50 @@ function buildGscpiInsights(data) {
     const latest = sorted[sorted.length - 1];
     const last12 = sorted.slice(-12);
 
-    const values = last12.map(
-        item => Number(item.gscpi)
-    );
+    const values = last12.map(item => Number(item.gscpi));
 
-    const average =
-        values.reduce((sum, value) => sum + value, 0)
-        / values.length;
+    const average = values.reduce(
+        (sum, value) => sum + value,
+        0
+    ) / values.length;
 
     const maximum = Math.max(...values);
     const minimum = Math.min(...values);
-    const amplitude = maximum - minimum;
 
-    let trend =
-        "1년 비교 판단: 데이터 부족";
+    let trend = "1년 비교 판단: 데이터 부족";
 
     if (sorted.length >= 13) {
         const previous = Number(
             sorted[sorted.length - 13].gscpi
         );
 
-        const difference =
-            Number(latest.gscpi) - previous;
+        const difference = Number(latest.gscpi) - previous;
 
-        if (difference > 0) {
-            trend =
-                "1년 전 대비 GSCPI: "
-                + numberFormat(difference, 2)
-                + "p 상승";
-        } else if (difference < 0) {
-            trend =
-                "1년 전 대비 GSCPI: "
-                + numberFormat(
-                    Math.abs(difference),
-                    2
-                )
-                + "p 하락";
-        } else {
-            trend =
-                "1년 전 대비 GSCPI: 유사한 수준 유지";
-        }
-    }
-
-    let level =
-        "최근 수준 평가: 최근 12개월 평균과 유사";
-
-    if (Number(latest.gscpi) > average) {
-        level =
-            "최근 수준 평가: 최근 12개월 평균 상회";
-    } else if (Number(latest.gscpi) < average) {
-        level =
-            "최근 수준 평가: 최근 12개월 평균 하회";
+        trend = difference > 0
+            ? "1년 전 대비 GSCPI "
+                + numberFormat(difference, 2) + "p 상승"
+            : difference < 0
+                ? "1년 전 대비 GSCPI "
+                    + numberFormat(Math.abs(difference), 2) + "p 하락"
+                : "1년 전 대비 GSCPI 유사한 수준 유지";
     }
 
     return [
         "최신 시점: " + latest.date.substring(0, 7),
-        "최신 GSCPI: "
-            + numberFormat(latest.gscpi, 2),
-        "최근 12개월 평균: "
-            + numberFormat(average, 2),
+        "최신 GSCPI: " + numberFormat(latest.gscpi, 2),
+        "최근 12개월 평균: " + numberFormat(average, 2),
         "최근 12개월 범위: "
             + numberFormat(minimum, 2)
             + " ~ "
             + numberFormat(maximum, 2),
-        "최근 12개월 변동폭: "
-            + numberFormat(amplitude, 2)
-            + "p",
-        level,
+        "최근 수준 평가: "
+            + (
+                Number(latest.gscpi) > average
+                    ? "최근 12개월 평균 상회"
+                    : Number(latest.gscpi) < average
+                        ? "최근 12개월 평균 하회"
+                        : "최근 12개월 평균과 유사"
+            ),
         trend
     ];
 }
@@ -2089,48 +2044,44 @@ function renderGscpiDashboard() {
     );
 
     const latest12 = sorted.slice(-12);
-    const values = latest12.map(
-        item => Number(item.gscpi)
-    );
-
+    const values = latest12.map(item => Number(item.gscpi));
     const latest = sorted[sorted.length - 1];
 
-    const average =
-        values.reduce((sum, value) => sum + value, 0)
-        / values.length;
+    const average = values.reduce(
+        (sum, value) => sum + value,
+        0
+    ) / values.length;
 
-    document.getElementById("latestGscpiKpi").innerText =
+    document.getElementById("latestGscpiKpi").textContent =
         latest.date.substring(0, 7);
 
-    document.getElementById("avgGscpiKpi").innerText =
+    document.getElementById("avgGscpiKpi").textContent =
         numberFormat(average, 2);
 
-    document.getElementById("maxGscpiKpi").innerText =
+    document.getElementById("maxGscpiKpi").textContent =
         numberFormat(Math.max(...values), 2);
 
-    document.getElementById("minGscpiKpi").innerText =
+    document.getElementById("minGscpiKpi").textContent =
         numberFormat(Math.min(...values), 2);
-
-    const lineTrace = {
-        x: sorted.map(item => item.date),
-        y: sorted.map(item => Number(item.gscpi)),
-        type: "scatter",
-        mode: "lines+markers",
-        name: "GSCPI",
-        line: {
-            color: "#0f766e",
-            width: 3
-        },
-        marker: {
-            size: 5
-        },
-        hovertemplate:
-            "%{x|%Y-%m}<br>GSCPI: %{y:.2f}<extra></extra>"
-    };
 
     Plotly.react(
         "gscpiLine",
-        [lineTrace],
+        [{
+            x: sorted.map(item => item.date),
+            y: sorted.map(item => Number(item.gscpi)),
+            type: "scatter",
+            mode: "lines+markers",
+            name: "GSCPI",
+            line: {
+                color: "#0f766e",
+                width: 3
+            },
+            marker: {
+                size: 5
+            },
+            hovertemplate:
+                "%{x|%Y-%m}<br>GSCPI: %{y:.2f}<extra></extra>"
+        }],
         chartLayout("", "GSCPI"),
         {
             responsive: true,
@@ -2138,24 +2089,18 @@ function renderGscpiDashboard() {
         }
     );
 
-    const barTrace = {
-        x: latest12.map(
-            item => item.date.substring(0, 7)
-        ),
-        y: latest12.map(
-            item => Number(item.gscpi)
-        ),
-        type: "bar",
-        marker: {
-            color: "#0f766e"
-        },
-        hovertemplate:
-            "%{x}<br>GSCPI: %{y:.2f}<extra></extra>"
-    };
-
     Plotly.react(
         "gscpiBar",
-        [barTrace],
+        [{
+            x: latest12.map(item => item.date.substring(0, 7)),
+            y: latest12.map(item => Number(item.gscpi)),
+            type: "bar",
+            marker: {
+                color: "#0f766e"
+            },
+            hovertemplate:
+                "%{x}<br>GSCPI: %{y:.2f}<extra></extra>"
+        }],
         chartLayout("", "GSCPI"),
         {
             responsive: true,
@@ -2171,7 +2116,6 @@ function renderGscpiDashboard() {
 
 function csvEscape(value) {
     const text = String(value ?? "");
-
     return '"' + text.replaceAll('"', '""') + '"';
 }
 
@@ -2217,10 +2161,7 @@ function downloadMacroData(dataset) {
     const inflation = selectedMacroData("inflation");
 
     if (dataset === "gdp") {
-        downloadCsv(
-            gdp,
-            "worldbank_gdp_growth.csv"
-        );
+        downloadCsv(gdp, "worldbank_gdp_growth.csv");
         return;
     }
 
@@ -2235,8 +2176,7 @@ function downloadMacroData(dataset) {
     const map = new Map();
 
     gdp.forEach(item => {
-        const key =
-            item.code + "|" + item.country + "|" + item.year;
+        const key = item.code + "|" + item.country + "|" + item.year;
 
         map.set(key, {
             code: item.code,
@@ -2249,8 +2189,7 @@ function downloadMacroData(dataset) {
     });
 
     inflation.forEach(item => {
-        const key =
-            item.code + "|" + item.country + "|" + item.year;
+        const key = item.code + "|" + item.country + "|" + item.year;
 
         if (!map.has(key)) {
             map.set(key, {
@@ -2266,18 +2205,13 @@ function downloadMacroData(dataset) {
         }
     });
 
-    const rows = Array.from(map.values()).sort(
-        (a, b) => {
-            const countryOrder =
-                a.country.localeCompare(b.country);
+    const rows = Array.from(map.values()).sort((a, b) => {
+        const countryOrder = a.country.localeCompare(b.country);
 
-            if (countryOrder !== 0) {
-                return countryOrder;
-            }
-
-            return Number(a.year) - Number(b.year);
-        }
-    );
+        return countryOrder !== 0
+            ? countryOrder
+            : Number(a.year) - Number(b.year);
+    });
 
     downloadCsv(
         rows,
@@ -2295,35 +2229,25 @@ function downloadGscpiData() {
 function showTab(tabName) {
     activeTab = tabName;
 
-    const macroSection =
-        document.getElementById("macroSection");
-
-    const gscpiSection =
-        document.getElementById("gscpiSection");
-
-    const macroTab =
-        document.getElementById("macroTab");
-
-    const gscpiTab =
-        document.getElementById("gscpiTab");
+    const macroSection = document.getElementById("macroSection");
+    const gscpiSection = document.getElementById("gscpiSection");
+    const macroTab = document.getElementById("macroTab");
+    const gscpiTab = document.getElementById("gscpiTab");
 
     if (tabName === "macro") {
         macroSection.classList.remove("hidden");
         gscpiSection.classList.add("hidden");
-
         macroTab.classList.add("active");
         gscpiTab.classList.remove("active");
-
         renderMacroDashboard();
-    } else {
-        macroSection.classList.add("hidden");
-        gscpiSection.classList.remove("hidden");
-
-        macroTab.classList.remove("active");
-        gscpiTab.classList.add("active");
-
-        renderGscpiDashboard();
+        return;
     }
+
+    macroSection.classList.add("hidden");
+    gscpiSection.classList.remove("hidden");
+    macroTab.classList.remove("active");
+    gscpiTab.classList.add("active");
+    renderGscpiDashboard();
 }
 
 async function initializeDashboard() {
@@ -2331,9 +2255,9 @@ async function initializeDashboard() {
         hideWarning();
 
         const responses = await Promise.all([
-            fetch("./macro_data.json"),
-            fetch("./gscpi_data.json"),
-            fetch("./dashboard_meta.json")
+            fetch("./macro_data.json", { cache: "no-store" }),
+            fetch("./gscpi_data.json", { cache: "no-store" }),
+            fetch("./dashboard_meta.json", { cache: "no-store" })
         ]);
 
         if (!responses.every(response => response.ok)) {
@@ -2347,55 +2271,38 @@ async function initializeDashboard() {
 
         const metaData = await responses[2].json();
 
-        document.getElementById("generatedAt").innerText =
+        document.getElementById("generatedAt").textContent =
             metaData.generated_at || "-";
 
         populateRegionSelect();
 
-        const initialCountries =
-            DEFAULT_COUNTRIES.filter(country => {
-                return macroData.countries.some(
-                    item => item.country === country
-                );
-            });
+        const initialCountries = DEFAULT_COUNTRIES.filter(country => {
+            return macroData.countries.some(
+                item => item.country === country
+            );
+        });
 
-        populateCountrySelect(
-            "전체",
-            initialCountries
-        );
+        populateCountrySelect("전체", initialCountries);
 
-        document
-            .getElementById("loading")
+        document.getElementById("loading")
             .classList.add("hidden");
 
         showTab(activeTab);
 
     } catch (error) {
-        document.getElementById("loading").innerHTML =
-            "<div class='empty'>"
-            + "대시보드 데이터 로드에 실패했습니다.<br>"
-            + "GitHub Actions 실행 결과 및 JSON 파일 배포 여부를 확인하세요."
-            + "</div>";
+        const loading = document.getElementById("loading");
+
+        loading.textContent =
+            "대시보드 데이터 로드에 실패했습니다. "
+            + "GitHub Actions 실행 결과와 JSON 파일 배포 여부를 확인하세요.";
 
         showWarning(
-            "데이터를 불러오지 못했습니다: "
-            + error.message
+            "데이터를 불러오지 못했습니다: " + error.message
         );
 
         console.error(error);
     }
 }
-
-const DEFAULT_COUNTRIES = [
-    "Canada",
-    "France",
-    "Germany",
-    "Italy",
-    "Japan",
-    "United Kingdom",
-    "United States",
-    "Korea, Rep."
-];
 
 window.addEventListener(
     "DOMContentLoaded",
@@ -2407,10 +2314,12 @@ window.addEventListener(
 """
 
 def generate_static_html():
-    """GitHub Pages용 index.html 파일을 생성한다."""
-    STATIC_HTML_PATH.write_text(
+    """
+    GitHub Pages용 index.html 파일을 생성한다.
+    """
+    atomic_write_text(
+        STATIC_HTML_PATH,
         STATIC_HTML,
-        encoding="utf-8",
     )
 
     log(f"[STATIC] 생성 완료: {STATIC_HTML_PATH.name}")
@@ -2422,37 +2331,101 @@ def generate_static_html():
 def index():
     """
     로컬 검증용 화면.
-    GitHub Pages 배포 환경에서는 index.html을 직접 사용한다.
+    GitHub Pages 환경에서는 생성된 index.html을 직접 사용한다.
     """
     if not STATIC_HTML_PATH.exists():
         generate_static_html()
 
-    return render_template_string(STATIC_HTML)
+    return Response(
+        STATIC_HTML,
+        mimetype="text/html; charset=utf-8",
+    )
 
-@app.route("/download_json/<filename>")
-def download_json(filename):
+@app.route("/macro_data.json")
+@app.route("/gscpi_data.json")
+@app.route("/dashboard_meta.json")
+def serve_json_file():
     """
-    로컬 개발 시 JSON 데이터 파일 확인을 위한 단순 엔드포인트.
-    GitHub Pages에서는 사용하지 않는다.
+    중요 수정:
+    Flask는 BASE_DIR의 정적 JSON 파일을 자동으로 제공하지 않는다.
+    따라서 로컬 개발 모드에서 JSON 파일 404를 방지하기 위한 라우트다.
     """
     allowed_files = {
-        "macro_data.json": MACRO_JSON_PATH,
-        "gscpi_data.json": GSCPI_JSON_PATH,
-        "dashboard_meta.json": META_JSON_PATH,
+        "macro_data.json",
+        "gscpi_data.json",
+        "dashboard_meta.json",
     }
 
-    target_path = allowed_files.get(filename)
+    filename = (
+        os.path.basename(
+            str(request_path_name())
+        )
+    )
 
-    if target_path is None or not target_path.exists():
+    if filename not in allowed_files:
         return Response(
             "File not found",
             status=404,
             mimetype="text/plain",
         )
 
-    return Response(
-        target_path.read_text(encoding="utf-8"),
-        mimetype="application/json; charset=utf-8",
+    path = BASE_DIR / filename
+
+    if not path.exists():
+        return Response(
+            "File not found",
+            status=404,
+            mimetype="text/plain",
+        )
+
+    return send_from_directory(
+        BASE_DIR,
+        filename,
+        mimetype="application/json",
+        as_attachment=False,
+    )
+
+def request_path_name():
+    """
+    Flask request import을 전역에서 최소화하기 위한 보조 함수.
+    """
+    from flask import request
+
+    return request.path.lstrip("/")
+
+@app.route("/download_json/<filename>")
+def download_json(filename):
+    """
+    로컬 개발 시 JSON 데이터 확인 및 다운로드용 엔드포인트.
+    """
+    allowed_files = {
+        "macro_data.json",
+        "gscpi_data.json",
+        "dashboard_meta.json",
+    }
+
+    if filename not in allowed_files:
+        return Response(
+            "File not found",
+            status=404,
+            mimetype="text/plain",
+        )
+
+    path = BASE_DIR / filename
+
+    if not path.exists():
+        return Response(
+            "File not found",
+            status=404,
+            mimetype="text/plain",
+        )
+
+    return send_from_directory(
+        BASE_DIR,
+        filename,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=filename,
     )
 
 # =========================================================
@@ -2546,11 +2519,14 @@ def main():
 
     init_cache_db()
 
-    if args.cron:
-        run_cron_job()
-        sys.exit(0)
+    if args.cron or os.environ.get("GITHUB_ACTIONS") == "true":
+        try:
+            run_cron_job()
+            sys.exit(0)
+        except Exception as error:
+            log(f"[ERROR] Cron 실행 실패: {error}")
+            sys.exit(1)
 
-    # 로컬 검증 모드에서도 최초 실행에 필요한 파일을 생성한다.
     try:
         data = collect_dashboard_data(
             force_refresh=args.refresh
@@ -2561,7 +2537,9 @@ def main():
 
     except Exception as error:
         log(f"[WARN] 데이터 갱신 실패: {error}")
-        log("[WARN] 기존 정적 파일 또는 SQLite 캐시가 있으면 사용합니다.")
+        log(
+            "[WARN] 기존 정적 파일 또는 SQLite 캐시가 있으면 사용합니다."
+        )
 
         if not STATIC_HTML_PATH.exists():
             generate_static_html()
@@ -2574,7 +2552,8 @@ def main():
         else find_available_port(host)
     )
 
-    local_url = f"http://{host}:{port}"
+    browser_host = "127.0.0.1" if host == "0.0.0.0" else host
+    local_url = f"http://{browser_host}:{port}"
 
     log(f"[INFO] SQLite 캐시 DB: {DB_PATH}")
     log(f"[INFO] Flask 서버 시작: {local_url}")
@@ -2582,7 +2561,7 @@ def main():
     if not args.no_open:
         threading.Thread(
             target=wait_and_open_browser,
-            args=(local_url, port),
+            args=(local_url, host, port),
             daemon=True,
         ).start()
 
